@@ -154,21 +154,23 @@ export function unidadesNoRecorte(level, sLevel, sId) {
 export const nomeRecorte = (level, id) => (level === 'estado' ? D.meta.uf_nome : getProps(level, id)?.n || '');
 
 /**
- * Território de X no recorte: locais de votação onde X é forte (acima de 1,25× a média do recorte, proporção encolhida). Quanto
- * dos eleitores ele reúne e quanto dos votos de X e de Y saiu dali. Se o território de X dá a Y bem mais do que o seu
- * peso no eleitorado, Y depende dele; se dá o mesmo, não.
+ * Território de X no recorte: os locais de votação onde X vai melhor (proporção encolhida), somando 20% do eleitorado
+ * do recorte. Quanto dos votos de X e de Y saiu dali. Sem relação entre os dois, o território daria a Y ~20% dos votos.
  */
-export function territorio(level, id) {
+export function territorio(level, id, fatia = 0.2) {
   return memo(`tt:${level}:${id}`, () => {
     const r = recorte(level, id);
     const u = D.un.local, nL = u.ids.length, secs = secsOf(level, id);
-    const gx = new Float64Array(nL), gy = new Float64Array(nL), gd = new Float64Array(nL), gdy = new Float64Array(nL);
-    for (const s of secs) { const g = u.idx[s]; gx[g] += A.X[s]; gy[g] += A.Y[s]; gd[g] += A.DX[s]; gdy[g] += A.DY[s]; }
-    let el = 0, elT = 0, vx = 0, vxT = 0, vy = 0, vyT = 0, n = 0;
-    for (let g = 0; g < nL; g++) {
-      if (!(gd[g] > 0)) continue;
-      el += gd[g]; vx += gx[g]; vy += gy[g];
-      if (gx[g] > 0 && terco(encolhe(gx[g], gd[g], r.px), r.px) === 2) { elT += gd[g]; vxT += gx[g]; vyT += gy[g]; n++; }
+    const gx = new Float64Array(nL), gy = new Float64Array(nL), gd = new Float64Array(nL);
+    for (const s of secs) { const g = u.idx[s]; gx[g] += A.X[s]; gy[g] += A.Y[s]; gd[g] += A.DX[s]; }
+    const gs = [];
+    let el = 0, vx = 0, vy = 0;
+    for (let g = 0; g < nL; g++) if (gd[g] > 0) { gs.push(g); el += gd[g]; vx += gx[g]; vy += gy[g]; }
+    gs.sort((a, b) => encolhe(gx[b], gd[b], r.px) - encolhe(gx[a], gd[a], r.px));
+    let elT = 0, vxT = 0, vyT = 0, n = 0;
+    for (const g of gs) {
+      if (elT >= fatia * el || !(gx[g] > 0)) break;
+      elT += gd[g]; vxT += gx[g]; vyT += gy[g]; n++;
     }
     return { n, eleitores: el > 0 ? elT / el : 0, votosX: vx > 0 ? vxT / vx : 0, votosY: vy > 0 ? vyT / vy : 0 };
   });

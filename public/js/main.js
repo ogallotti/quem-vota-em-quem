@@ -6,13 +6,13 @@ import { abrirBusca, buscaAberta, fecharBusca } from './busca.js';
 import { clear, h } from './fmt.js';
 import { MapView } from './map.js';
 import { Tooltip, classeBiv, renderCrumbs, renderLegend, renderMain, renderMainBR, renderSide, renderSideBR } from './panel.js';
-import { BIV, DIV, LADO, LENTES, NOVOTE, RAMP, SEM_DADO, XT, classeLado, classeR, classeSeq, classesSeq } from './scales.js';
-import { quantis, terco } from './stats.js';
+import { BIV, BOLHA, DIV, LADO, LENTES, NOVOTE, RAMP, SEM_DADO, XT, YX, classeBolha, classeLado, classeR, classeSeq, classesSeq } from './scales.js';
+import { faixa, quantis, quantisPonderados, terco } from './stats.js';
 import { ICON } from './ui.js';
 
 const $ = (id) => document.getElementById(id);
 const CRUMBS = $('crumbs'); // mora dentro da barra do mapa (que é refeita a cada mudança)
-const state = { modo: 'br', uf: null, x: null, y: null, lente: 'xt', mode: 'auto', sel: { level: 'estado', id: 0 }, tab: 'junto', afCargo: null, ondeOrd: 'x', mais: false };
+const state = { modo: 'br', uf: null, x: null, y: null, lente: 'yx', mode: 'auto', sel: { level: 'estado', id: 0 }, tab: 'junto', afCargo: null, ondeOrd: 'x', mais: false };
 const touch = matchMedia('(pointer: coarse)').matches || (navigator.maxTouchPoints > 0 && matchMedia('(hover: none)').matches);
 let view, tooltip, polos = null, sugestoes = null;
 window.__state = state;
@@ -64,7 +64,7 @@ function writeHash() {
     const q = new URLSearchParams();
     if (state.modo === 'uf') {
       q.set('uf', state.uf); q.set('x', state.x); q.set('y', state.y);
-      if (state.lente !== 'xt') q.set('l', state.lente);
+      if (state.lente !== 'yx') q.set('l', state.lente);
       if (state.sel.level !== 'estado') q.set('s', `${state.sel.level}:${state.sel.id}`);
     }
     const s = q.toString().replace(/%3A/g, ':');
@@ -97,15 +97,53 @@ function pintar() {
   };
   state.seq = seq;
   let paint;
-  if (lente === 'xt') {
+  if (lente === 'yx') {
+    // luz = quintis do eleitorado pela força de Y; cor = quintis pela força de X (cada nível com a sua régua)
+    const cortes = new Map();
+    const cortesDe = (lv, qual) => {
+      const k = `${lv}:${qual}`;
+      if (!cortes.has(k)) {
+        const u = D.un[lv], set = unidadesNoRecorte(lv, sl, si), vals = [], pesos = [];
+        for (const id of u.ids) if (!set || set.has(id)) { const v = valorDe(lv, id); if (v && v.dx > 0) { vals.push(qual === 'x' ? (v.x > 0 ? v.ex : 0) : (v.y > 0 ? v.ey : 0)); pesos.push(v.dx); } }
+        // com poucas áreas, faixas de 20% do eleitorado não fazem sentido: régua pela média do recorte
+        const media = qual === 'x' ? r.px : r.py;
+        cortes.set(k, vals.length < 15 ? [0.5, 0.8, 1.25, 2].map((f) => f * media) : quantisPonderados(vals, pesos, 5));
+      }
+      return cortes.get(k);
+    };
+    paint = {
+      palette: YX, none: SEM_DADO,
+      k: (lv, id) => {
+        if (fora(lv, id)) return -2;
+        const v = valorDe(lv, id);
+        if (!v || !(v.dx > 0)) return -1;
+        const fy = v.y > 0 ? faixa(v.ey, cortesDe(lv, 'y')) : 0, fx = v.x > 0 ? faixa(v.ex, cortesDe(lv, 'x')) : 0;
+        return fy * 5 + fx;
+      },
+      label: () => '',
+    };
+  } else if (lente === 'bo') {
+    // fundo neutro: só o recorte em cinza-escuro, contornos visíveis; a informação está nas bolhas
+    paint = { palette: ['#25231f'], none: '#25231f', k: (lv, id) => (fora(lv, id) ? -2 : 0), label: () => '' };
+  } else if (lente === 'xt') {
+    // brilho: quintis do eleitorado do recorte pela força de X, por nível (cada nível tem a sua régua)
+    const cortes = new Map();
+    const cortesDe = (lv) => {
+      if (!cortes.has(lv)) {
+        const u = D.un[lv], set = unidadesNoRecorte(lv, sl, si), vals = [], pesos = [];
+        for (const id of u.ids) if (!set || set.has(id)) { const v = valorDe(lv, id); if (v && v.dx > 0) { vals.push(v.x > 0 ? v.ex : 0); pesos.push(v.dx); } }
+        cortes.set(lv, quantisPonderados(vals, pesos, 5));
+      }
+      return cortes.get(lv);
+    };
     paint = {
       palette: XT, none: SEM_DADO,
       k: (lv, id) => {
         if (fora(lv, id)) return -2;
         const v = valorDe(lv, id);
         if (!v || !(v.dx > 0)) return -1;
-        const iy = terco(v.ey, r.py);
-        return v.x > 0 && terco(v.ex, r.px) === 2 ? iy : 3 + iy; // território = X acima de 1,25× a média do recorte
+        const fx = v.x > 0 ? faixa(v.ex, cortesDe(lv)) : 0;
+        return fx * 3 + terco(v.ey, r.py);
       },
       label: () => '',
     };
@@ -124,13 +162,45 @@ function pintar() {
     };
   }
   view.setPaint(paint);
+  bolhas();
   legenda();
+}
+
+/** Bolhas da lente "Eleitores de X" no nível visível: tamanho = votos de X, cor = força de Y ÷ média do recorte. */
+const RAIO = { macro: 46, municipio: 26, zona: 24, bairro: 18, local: 13, secao: 9 };
+function bolhas() {
+  if (state.modo !== 'uf' || state.lente !== 'bo' || !A.X) { view?.setBolhas(null); return; }
+  const lv = view.view?.poly || 'municipio';
+  const { level: sl, id: si } = state.sel;
+  const r = recorte(sl, si);
+  const set = unidadesNoRecorte(lv, sl, si);
+  const itens = [];
+  const add = (nivel, f) => {
+    const p = f.properties;
+    if (set && !set.has(p.id) && nivel === lv) return;
+    let xy = p.lx != null ? [p.lx, p.ly] : nivel === 'local' ? [D.loc.x[p.id], D.loc.y[p.id]] : null;
+    if (!xy) return;
+    const v = valorDe(nivel, p.id);
+    if (!v || !(v.x > 0)) return;
+    itens.push({ xy, v, nivel, id: p.id });
+  };
+  if (lv === 'bairro') {
+    for (const f of D.lv.bairro.fc?.features || []) add('bairro', f);
+    for (const f of D.lv.municipio.fc.features) if (!f.properties.bb && (!unidadesNoRecorte('municipio', sl, si) || unidadesNoRecorte('municipio', sl, si).has(f.properties.id))) add('municipio', f);
+  } else for (const f of D.lv[lv].fc?.features || []) add(lv, f);
+  const max = Math.max(1, ...itens.map((i) => i.v.x));
+  const rmax = RAIO[lv] || 16;
+  view.setBolhas({ type: 'FeatureCollection', features: itens.map(({ xy, v }) => ({
+    type: 'Feature', geometry: { type: 'Point', coordinates: xy },
+    properties: { r: Math.max(1.6, rmax * Math.sqrt(v.x / max)), c: BOLHA[classeBolha(r.py > 0 ? v.ey / r.py : 1)] },
+  })) });
+  state.bolhaMax = { votos: max, rmax };
 }
 
 function legenda() {
   if (state.modo !== 'uf' || !state.seq) return;
   const { level: sl, id: si } = state.sel, lente = state.lente;
-  renderLegend($('legend'), { lente, classes: lente === 'x' || lente === 'y' ? state.seq(view.view?.poly || 'municipio') : null, escopo: sl === 'estado' ? 'do estado' : `de ${getProps(sl, si)?.n || ''}` });
+  renderLegend($('legend'), { lente, bolhaMax: state.bolhaMax, classes: lente === 'x' || lente === 'y' ? state.seq(view.view?.poly || 'municipio') : null, escopo: sl === 'estado' ? 'do estado' : `de ${getProps(sl, si)?.n || ''}` });
 }
 
 // ------------------------------------------------------------------ cartões
@@ -163,8 +233,8 @@ function renderTop() {
   if (state.modo !== 'uf') { mb.hidden = true; clear(CRUMBS); return; }
   mb.hidden = false;
   const seg = h('div', { class: 'seg', role: 'radiogroup', 'aria-label': 'O que pintar' });
-  const nomes = { xt: `Onde ${curtoNome(state.x)} é forte`, bi: 'Os dois', x: curtoNome(state.x), y: curtoNome(state.y), r: 'Correlação' };
-  for (const id of ['xt', 'bi', 'x', 'y', 'r']) seg.append(h('button', { type: 'button', role: 'radio', 'aria-checked': String(state.lente === id), class: state.lente === id ? 'on' : '', title: LENTES[id].desc, onclick: () => ctl.setLente(id) }, nomes[id]));
+  const nomes = { yx: 'Luz e cor', bi: 'Os dois', x: curtoNome(state.x), y: curtoNome(state.y), r: 'Correlação' };
+  for (const id of ['yx', 'bi', 'x', 'y', 'r']) seg.append(h('button', { type: 'button', role: 'radio', 'aria-checked': String(state.lente === id), class: state.lente === id ? 'on' : '', title: LENTES[id].desc, onclick: () => ctl.setLente(id) }, nomes[id]));
   const niv = h('div', { class: 'seg', role: 'radiogroup', 'aria-label': 'Nível do mapa' });
   for (const [id, t] of [['auto', 'Auto'], ['municipio', 'Municípios'], ['bairro', 'Bairros'], ['local', 'Locais'], ['secao', 'Seções']]) niv.append(h('button', { type: 'button', role: 'radio', 'aria-checked': String(state.mode === id), class: state.mode === id ? 'on' : '', onclick: () => ctl.setMode(id) }, t));
   mb.append(seg, niv, CRUMBS);
@@ -226,7 +296,7 @@ const ctl = {
     if (state.modo !== 'uf' || (level !== 'estado' && !getProps(level, id))) return;
     state.sel = { level, id };
     state.mais = false;
-    const min = { macro: 'municipio', municipio: getProps('municipio', id)?.bb ? 'bairro' : 'local', zona: 'local', bairro: 'local', local: 'secao', secao: 'secao' }[level];
+    const min = { estado: 'municipio', macro: 'municipio', municipio: getProps('municipio', id)?.bb ? 'bairro' : 'local', zona: 'local', bairro: 'local', local: 'secao', secao: 'secao' }[level];
     view.setMinLevel(min);
     const mi = munOf(level, id);
     if (mi != null && (min === 'local' || min === 'secao')) carregarPolys([mi]);
@@ -359,7 +429,7 @@ async function boot() {
         const pai = pais[pais.length - 1] || { level: 'estado', id: 0 };
         ctl.select(pai.level, pai.id);
       },
-      onView: () => legenda(),
+      onView: () => { bolhas(); legenda(); },
       onMoveEnd: () => {
         // detalhe de locais e seções: municípios na tela, ao aproximar ou quando o nível pedido é local/seção
         const fino = ['local', 'secao'].includes(view.view?.want) || ['local', 'secao'].includes(state.mode);
@@ -398,7 +468,7 @@ addEventListener('keydown', (e) => {
   if (state.modo !== 'uf') return;
   if (k === 'x' || k === 'y') { e.preventDefault(); abrirPicker(k); }
   else if (k === 'i') ctl.trocar();
-  else if (/^[1-5]$/.test(k)) ctl.setLente(['xt', 'bi', 'x', 'y', 'r'][Number(k) - 1]);
+  else if (/^[1-5]$/.test(k)) ctl.setLente(['yx', 'bi', 'x', 'y', 'r'][Number(k) - 1]);
   else if (k === 'f') { document.body.classList.toggle('focus'); setTimeout(() => view?.resize(), 30); }
   else if (k === 'escape') { if (state.sel.level !== 'estado') ctl.select('estado', 0); else ctl.irBrasil(); }
 });

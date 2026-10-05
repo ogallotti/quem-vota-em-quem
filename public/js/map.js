@@ -125,6 +125,16 @@ export class MapView {
   }
 
   _initLabels() {
+    // bolhas (eleitores de X): abaixo dos rótulos, acima dos polígonos; as menores por cima das maiores
+    this.map.addSource('bolhas', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    this.map.addLayer({
+      id: 'bolhas', source: 'bolhas', type: 'circle', layout: { 'circle-sort-key': ['-', 0, ['get', 'r']] },
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, ['*', ['get', 'r'], 0.75], 8, ['get', 'r'], 14, ['*', ['get', 'r'], 1.25]], // zoom no topo
+        'circle-color': ['get', 'c'], 'circle-opacity': 0.92,
+        'circle-stroke-color': BG, 'circle-stroke-width': 1, 'circle-stroke-opacity': 0.9, 'circle-pitch-alignment': 'map',
+      },
+    });
     this.map.addSource('labels', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     this.map.addLayer({
       id: 'labels-sym', source: 'labels', type: 'symbol',
@@ -157,6 +167,9 @@ export class MapView {
   }
 
   setPaint(paint) { this.paint = paint; this.ver++; this._applyView(true); }
+
+  /** Bolhas: FeatureCollection de pontos {r: raio em px, c: cor} ou null (some). */
+  setBolhas(fc) { this.map.getSource('bolhas')?.setData(fc || { type: 'FeatureCollection', features: [] }); }
 
   _paintLevel(level) {
     const lay = this.levelLayers[level];

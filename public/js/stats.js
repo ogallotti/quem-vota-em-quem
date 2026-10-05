@@ -255,3 +255,22 @@ export function quantis(valores, k) {
   }
   return out;
 }
+
+/**
+ * Cortes que dividem os valores em k faixas com o mesmo peso total (ex.: quintis do eleitorado). Devolve k − 1 cortes.
+ * Ex.: com pesos = eleitores, a faixa de cima reúne os 20% de eleitores que estão onde o valor é mais alto.
+ */
+export function quantisPonderados(valores, pesos, k = 5) {
+  const idx = valores.map((_, i) => i).filter((i) => pesos[i] > 0 && Number.isFinite(valores[i])).sort((a, b) => valores[a] - valores[b]);
+  const tot = idx.reduce((t, i) => t + pesos[i], 0);
+  const out = [];
+  let acc = 0, j = 1;
+  for (const i of idx) {
+    acc += pesos[i];
+    while (j < k && acc >= (tot * j) / k) { out.push(valores[i]); j++; }
+  }
+  while (out.length < k - 1) out.push(Infinity);
+  return out;
+}
+/** Faixa (0 = mais baixa … cortes.length = mais alta) de um valor. */
+export const faixa = (v, cortes) => { let f = 0; while (f < cortes.length && v > cortes[f]) f++; return f; };

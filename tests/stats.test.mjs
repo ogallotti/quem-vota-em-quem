@@ -1,7 +1,7 @@
 // Testes do núcleo estatístico com dados sintéticos de verdade conhecida.  node --test tests/
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { analisa, encolhe, forca, goodman, leitura, pearson, terco } from '../public/js/stats.js';
+import { analisa, encolhe, faixa, forca, goodman, leitura, pearson, quantisPonderados, terco } from '../public/js/stats.js';
 
 // gerador determinístico (mulberry32)
 function rng(seed) {
@@ -140,4 +140,15 @@ test('encolhimento: unidade pequena puxada para a média, grande quase intacta',
   const media = 0.1;
   assert.ok(Math.abs(encolhe(10, 50, media) - 0.1556) < 0.001); // 20% em 50 eleitores vira ~15,6%
   assert.ok(Math.abs(encolhe(200, 1000, media) - 0.1962) < 0.001); // 20% em 1.000 fica ~19,6%
+});
+
+test('quintis ponderados pelo eleitorado', () => {
+  // 5 lugares de mesmo peso: um em cada quintil
+  const c = quantisPonderados([5, 1, 4, 2, 3], [1, 1, 1, 1, 1]);
+  assert.deepEqual(c, [1, 2, 3, 4]);
+  assert.deepEqual([1, 2, 3, 4, 5].map((v) => faixa(v, c)), [0, 1, 2, 3, 4]);
+  // empates no corte ficam na faixa de baixo: lugares sem voto (zero) nunca sobem de faixa
+  const z = quantisPonderados([0, 0, 0, 0, 5], [1, 1, 1, 1, 1]);
+  assert.equal(faixa(0, z), 0);
+  assert.equal(faixa(5, z), 4);
 });
