@@ -1,7 +1,7 @@
 // Testes do núcleo estatístico com dados sintéticos de verdade conhecida.  node --test tests/
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { analisa, encolhe, faixa, forca, goodman, leitura, pearson, quantisPonderados, terco } from '../public/js/stats.js';
+import { analisa, encolhe, faixa, forca, goodman, leitura, pearson, quantisPonderados, respostaEstimativa, terco } from '../public/js/stats.js';
 
 // gerador determinístico (mulberry32)
 function rng(seed) {
@@ -151,4 +151,26 @@ test('quintis ponderados pelo eleitorado', () => {
   const z = quantisPonderados([0, 0, 0, 0, 5], [1, 1, 1, 1, 1]);
   assert.equal(faixa(0, z), 0);
   assert.equal(faixa(5, z), 4);
+});
+
+test('a resposta vem da estimativa individual (e não da correlação)', () => {
+  // X pequeno cujos eleitores votam em peso em Y: correlação baixa, mas a resposta é "sim"
+  const a = respostaEstimativa(0.74, 0.44, 1, 0.31);
+  assert.equal(a.k, 'sim'); assert.ok(a.impreciso); assert.ok(a.forte); // 74% ≥ 1,5 × 31%: bem mais, mas impreciso
+  assert.equal(respostaEstimativa(0.6, 0.55, 0.65, 0.2).forte, true);
+  assert.equal(respostaEstimativa(0.4, 0.36, 0.44, 0.31).forte, false); // sim, mas só um pouco
+  assert.equal(respostaEstimativa(0.05, 0.02, 0.08, 0.3).k, 'nao');
+  assert.equal(respostaEstimativa(0.33, 0.2, 0.45, 0.31).k, 'igual'); // a faixa inclui os demais
+  // e, de ponta a ponta, um X pequeno com 70% de transferência dá "sim" mesmo com correlação modesta
+  const r = rng(17), n = 3000, X = new Float64Array(n), Y = new Float64Array(n), D = new Float64Array(n);
+  for (let s = 0; s < n; s++) {
+    const N = 300, px = 0.005 + 0.06 * r() ** 3;
+    let x = 0, y = 0;
+    for (let i = 0; i < N; i++) { const vx = r() < px; x += vx; y += r() < (vx ? 0.7 : 0.3); }
+    X[s] = x; Y[s] = y; D[s] = N;
+  }
+  const secs = Int32Array.from({ length: n }, (_, i) => i);
+  const an = analisa({ secs, grupo: secs, nG: n, X, Y, DX: D, DY: D });
+  assert.ok(an.r < 0.35, `r ${an.r}`);
+  assert.equal(respostaEstimativa(an.gd.est, an.gd.lo, an.gd.hi, an.gd.demais).k, 'sim');
 });

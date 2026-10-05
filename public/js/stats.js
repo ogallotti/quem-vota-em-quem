@@ -274,3 +274,19 @@ export function quantisPonderados(valores, pesos, k = 5) {
 }
 /** Faixa (0 = mais baixa … cortes.length = mais alta) de um valor. */
 export const faixa = (v, cortes) => { let f = 0; while (f < cortes.length && v > cortes[f]) f++; return f; };
+
+/**
+ * A resposta à pergunta do site ("quem vota em X vota em Y?") pela estimativa individual, não pela correlação: a
+ * correlação mede se os votos coincidem no mapa e, para um X pequeno, sai baixa mesmo quando os eleitores dele votam em
+ * peso em Y. Sim = até o piso da faixa provável fica acima da taxa dos demais; não = até o teto fica abaixo. O tamanho
+ * ("bem mais") vem da estimativa; a imprecisão da faixa vira um aviso à parte.
+ */
+export function respostaEstimativa(est, lo, hi, demais) {
+  if (est == null || demais == null) return null;
+  const L = lo ?? est, H = hi ?? est;
+  const impreciso = H - L > 0.35;
+  // direção pela faixa (certeza); tamanho pela estimativa ("bem mais" = 1,5× ou mais)
+  if (L > demais * 1.1 && L - demais > 0.01) return { k: 'sim', forte: est >= demais * 1.5, impreciso, vezes: demais > 0 ? est / demais : null };
+  if (H < demais / 1.1 && demais - H > 0.01) return { k: 'nao', forte: est <= demais / 1.5, impreciso };
+  return { k: 'igual', impreciso };
+}

@@ -4,7 +4,7 @@ import { A, lado, rPorUnidade, recorte, territorio, valorDe } from './analise.js
 import { BR, D, LEVEL_INFO, candOf, cargoOf, childrenOf, entityName, getProps, parentChain } from './data.js';
 import { clear, fInt, fPct, h } from './fmt.js';
 import { BIV, BIV_TXT, DIV, LADO, SEM_DADO, YX } from './scales.js';
-import { leitura, terco } from './stats.js';
+import { leitura, respostaEstimativa, terco } from './stats.js';
 import { ICON, avatar, cargoCurto, chipCand, curto, situacao } from './ui.js';
 
 const nf2 = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -140,9 +140,26 @@ function veredito(r, escopo) {
   const X = curto(nomeCand(A.x)), Y = curto(nomeCand(A.y));
   const nx = () => sp('x', X), ny = () => sp('y', Y);
   const l = r.r == null && r.lift == null ? { k: 'nd' } : leitura(r.r, r.lift, r.ci);
+  const linhas = [];
   let titulo;
+  const est = !r.exclusivos && r.gd ? respostaEstimativa(r.gd.est, r.gd.lo, r.gd.hi, r.gd.demais) : null;
   if (r.exclusivos) {
     titulo = l.k === 'pos' ? [nx(), ' e ', ny(), ' disputam os mesmos lugares.'] : l.k === 'neg' ? [nx(), ' e ', ny(), ' têm territórios diferentes.'] : [nx(), ' e ', ny(), ' não disputam o mesmo território.'];
+    linhas.push('Os dois concorrem à mesma vaga: cada eleitor vota em um só. A pergunta passa a ser se buscam voto nos mesmos lugares.');
+  } else if (est) {
+    // a manchete responde a pergunta do site: os eleitores de X votaram em Y mais (ou menos) que os demais?
+    titulo = {
+      sim: est.forte ? ['Sim. Os eleitores de ', nx(), ' votaram em ', ny(), ' bem mais que os demais.'] : ['Sim. Os eleitores de ', nx(), ' votaram um pouco mais em ', ny(), ' que os demais.'],
+      nao: est.forte ? ['Não. Os eleitores de ', nx(), ' votaram bem menos em ', ny(), ' que os demais.'] : ['Não. Os eleitores de ', nx(), ' votaram um pouco menos em ', ny(), ' que os demais.'],
+      igual: ['Não dá para dizer. Os eleitores de ', nx(), ' votaram em ', ny(), ' como os demais, dentro da margem.'],
+    }[est.k];
+    if (est.impreciso) linhas.push(`Estimativa imprecisa (faixa provável de ${fP0(r.gd.lo)} a ${fP0(r.gd.hi)}): leia como ordem de grandeza.`);
+    // a correlação fala do mapa; para um X pequeno ela sai baixa mesmo quando os eleitores dele votam em peso em Y
+    if (r.r != null) {
+      if (r.r >= 0.2) linhas.push(`No mapa, os votos dos dois também coincidem (correlação ${fR(r.r)}).`);
+      else if (r.r <= -0.2) linhas.push(`No mapa, os dois têm bases em lugares diferentes (correlação ${fR(r.r)}).`);
+      else if (est.k === 'sim' && r.px < 0.1) linhas.push(`No mapa, os votos dos dois quase não coincidem (correlação ${fR(r.r)}): ${X} tem poucos votos em cada urna, então mesmo uma preferência forte dos eleitores dele mexe pouco no resultado de ${Y}.`);
+    }
   } else {
     titulo = {
       pos: [null, ['Pouco. A sobreposição entre ', nx(), ' e ', ny(), ' é fraca.'], ['Em parte. Os votos de ', nx(), ' e ', ny(), ' se sobrepõem.'], ['Sim. Onde ', nx(), ' é forte, ', ny(), ' também é.']][l.nivel],
@@ -151,15 +168,10 @@ function veredito(r, escopo) {
       inc: ['Inconclusivo: o sinal não se distingue do acaso.'],
       mix: ['Sinais mistos: veja os pontos.'], nd: ['Sem dados suficientes.'],
     }[l.k];
+    if (r.yx != null) linhas.push(`Onde vota o eleitor de ${X}, ${Y} faz ${fP(r.yx)} dos votos; ${escopo.em}, ${fP(r.py)}.`);
   }
-  const linhas = [];
-  if (r.exclusivos) linhas.push('Os dois concorrem à mesma vaga: cada eleitor vota em um só. A pergunta passa a ser se buscam voto nos mesmos lugares.');
-  else if (r.yx != null) linhas.push(`Onde vota o eleitor de ${X}, ${Y} faz ${fP(r.yx)} dos votos; ${escopo.em}, ${fP(r.py)}.`);
-  if (r.r != null && r.rw != null && Math.abs(r.r) >= 0.2) {
-    if (Math.abs(r.rw) < 0.1) linhas.push('Dentro de cada município, porém, os dois não andam juntos: a coincidência é regional (fortes nas mesmas regiões), não necessariamente dos mesmos eleitores.');
-    else if (Math.sign(r.rw) === Math.sign(r.r)) linhas.push(r.r > 0 ? 'E isso vale também dentro de cada município: sinal mais forte de eleitorado em comum.' : 'E isso vale também dentro de cada município: os eleitorados se repelem até nos mesmos bairros.');
-  }
-  if (r.n < 20) linhas.push(`Só ${r.n} ${r.unidade === 'local' ? 'locais' : 'seções'} no recorte: leitura frágil.`);
+  if (r.r != null && r.rw != null && r.r >= 0.2 && Math.abs(r.rw) < 0.1) linhas.push(`Dentro de cada um dos ${r.blocos}, porém, os dois não andam juntos: parte da coincidência é regional.`);
+  if (r.n < 20) linhas.push(`Só ${r.n} seções no recorte: leitura frágil.`);
   return { l, titulo, linhas };
 }
 
@@ -199,14 +211,15 @@ export function renderMain(el, level, id, ctx) {
     frag.push(h('div', { class: 'bars' },
       h('div', null, h('div', { class: 'bar-l' }, h('span', null, 'Dos eleitores de ', sp('x', X)), h('b', { class: 'tn' }, `~${fP0(r.gd.est)}`)), barra(r.gd.est, r.gd.lo != null ? [r.gd.lo, r.gd.hi] : null, '', escala)),
       h('div', null, h('div', { class: 'bar-l' }, h('span', null, 'Dos demais eleitores'), h('b', { class: 'tn' }, `~${fP0(r.gd.demais)}`)), barra(r.gd.demais, null, 'demais', escala)),
-      h('div', { class: 'small muted' }, `votaram em ${Y} (estimativa${r.gd.lo != null ? `, faixa provável ${fP0(r.gd.lo)} a ${fP0(r.gd.hi)}` : ''})${vezes && vezes >= 1.5 ? `: ${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 }).format(vezes)} vezes mais que os demais` : ''}.${escala < 1 ? ` Barras ampliadas: o fim da barra é ${fP0(escala)}.` : ''}`)));
+      h('div', { class: 'small muted' }, `votaram em ${Y} (estimativa${r.gd.lo != null ? `; faixa provável ${fP0(r.gd.lo)} a ${fP0(r.gd.hi)}, o traço sobre a barra` : ''})${vezes && vezes >= 1.5 ? `: ${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 }).format(vezes)} vezes a taxa dos demais` : ''}.${escala < 1 ? ` Barras ampliadas: o fim da barra é ${fP0(escala)}.` : ''}`)));
   }
   const tt = territorio(level, id);
   if (tt.n > 1 && tt.eleitores > 0.05) {
     const peso = tt.votosY / tt.eleitores;
-    frag.push(h('p', { class: 'terr' }, `As áreas onde ${X} é mais forte (${fInt(tt.n)} ${r.unidade === 'local' || true ? 'locais' : ''}, `, h('b', null, fP0(tt.eleitores)), ' dos eleitores) deram ',
-      h('b', { class: 'x' }, fP0(tt.votosX)), ` dos votos de ${X} e `, h('b', { class: 'y' }, fP0(tt.votosY)), ` dos de ${Y}`,
-      peso >= 1.2 ? `: ${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 }).format(peso)}× o esperado se não houvesse relação.` : peso <= 0.83 ? `: menos que o esperado (${fP0(tt.eleitores)}); ${Y} vai melhor fora delas.` : ': o esperado se não houvesse relação.'));
+    const fx = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 }).format(peso);
+    const leitura = peso >= 1.2 ? `: ${fx}× o esperado se não houvesse relação.` : peso >= 1.05 ? `: um pouco acima do esperado (${fP0(tt.eleitores)}).` : peso > 0.95 ? `: o esperado se não houvesse relação (${fP0(tt.eleitores)}).` : peso > 0.83 ? `: um pouco abaixo do esperado (${fP0(tt.eleitores)}).` : `: menos que o esperado (${fP0(tt.eleitores)}); ${Y} vai melhor fora delas.`;
+    frag.push(h('p', { class: 'terr' }, `No mapa: as ${fInt(tt.n)} seções onde ${X} é mais forte (`, h('b', null, fP0(tt.eleitores)), ' dos eleitores) deram ',
+      h('b', { class: 'x' }, fP0(tt.votosX)), ` dos votos de ${X} e `, h('b', { class: 'y' }, fP0(tt.votosY)), ` dos de ${Y}`, leitura));
   }
   const cR = (x) => (x == null ? '—' : sp(x > 0.1 ? 'pos' : x < -0.1 ? 'neg' : '', fR(x)));
   frag.push(h('div', { class: 'stats' },
