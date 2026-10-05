@@ -1,6 +1,6 @@
 // Controlador: Brasil ↔ estado, par (X, Y), lente, recorte, carga sob demanda, endereço compartilhável, teclado e
 // gaveta do celular. Zero backend: só arquivos estáticos.
-import { A, porUnidade, rPorUnidade, recorte, setPar, unidadesNoRecorte, valorDe } from './analise.js';
+import { A, distribuicao, porUnidade, rPorUnidade, recorte, setPar, unidadesNoRecorte, valorDe } from './analise.js';
 import { BR, D, LEVEL_INFO, candOf, focusGeometry, getProps, loadAf, loadBR, loadCands, loadMunPolys, loadNomes, loadSerie, loadUF, loadZB, munOf, parentChain } from './data.js';
 import { abrirBusca, buscaAberta, fecharBusca } from './busca.js';
 import { clear, h } from './fmt.js';
@@ -162,7 +162,19 @@ const ctxSide = () => ({
   onTrouxeCargo: (c) => { state.trouxeCargo = c; renderCards(); },
   onTrouxeOrd: (o) => { state.trouxeOrd = o; renderCards(); },
   onX: (k) => ctl.setX(k),
+  distribuicao: pedirDistribuicao,
 });
+/** Divisão dos eleitores de X entre os candidatos do cargo de Y (assíncrona; redesenha quando terminar). */
+function pedirDistribuicao() {
+  const { level, id } = state.sel, cargo = candOf(state.y)?.cargo;
+  const k = `${A.ver}|${cargo}|${level}:${id}`;
+  if (state.distRes?.k === k) return state.distRes.res;
+  if (state.distPend !== k) {
+    state.distPend = k;
+    distribuicao(level, id, cargo).then((res) => { if (res && state.distPend === k) { state.distRes = { k, res }; renderCards(); } }).catch(() => {});
+  }
+  return { loading: true };
+}
 /** Cargo do ranking: o escolhido ou o "par natural" de Y (estadual ↔ federal; majoritários → estadual). */
 function cargoTrouxe() {
   const cy = candOf(state.y)?.cargo, tem = (c) => D.cargos.has(c);

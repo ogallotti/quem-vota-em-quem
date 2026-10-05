@@ -161,12 +161,13 @@ export function renderMain(el, level, id, ctx) {
     const l = r.r == null ? { k: 'nd' } : leitura(r.r, r.lift, r.ci);
     titulo = l.k === 'pos' ? [nx(), ' e ', ny(), ' disputam votos nos mesmos lugares.'] : l.k === 'neg' ? [nx(), ' e ', ny(), ' têm territórios diferentes.'] : [nx(), ' e ', ny(), ' não disputam o mesmo território.'];
   } else if (!m) titulo = ['Sem dados suficientes neste recorte.'];
-  else titulo = {
-    sim: ['Os eleitores de ', nx(), ` parecem ter votado ${m.forte ? 'bem mais' : 'um pouco mais'} em `, ny(), ' que os demais.'],
-    nao: ['Os eleitores de ', nx(), ` parecem ter votado ${m.forte ? 'bem menos' : 'um pouco menos'} em `, ny(), ' que os demais.'],
-    igual: ['Os eleitores de ', nx(), ' parecem ter votado em ', ny(), ' como os demais.'],
-    diverge: ['Não dá para afirmar se os eleitores de ', nx(), ' votaram mais ou menos em ', ny(), ' que os demais.'],
-  }[m.k];
+  else {
+    // primeiro o quanto (absoluto), depois a comparação: "votou mais em Y que os demais" sozinho soa como maioria
+    const quanto = (lo, hi) => (Math.abs(hi - lo) < 0.005 ? `~${fP0(lo)}` : `de ${fP0(lo)} a ${fP0(hi)}`);
+    const comp = { sim: m.forte ? 'bem mais que' : 'um pouco mais que', nao: m.forte ? 'bem menos que' : 'um pouco menos que', igual: 'como', diverge: null }[m.k];
+    titulo = ['Estima-se que ', quanto(m.modelos[0], m.modelos[1]), ' dos eleitores de ', nx(), ' votaram em ', ny(),
+      comp ? `: ${comp} os demais eleitores (${quanto(m.demais[0], m.demais[1]).replace(/^de /, '')}).` : '. Não dá para afirmar se mais ou menos que os demais.'];
+  }
   frag.push(h('div', { class: 'answer' }, h('h2', { class: 'verdict' }, ...titulo)));
 
   // ---- 1. o que é certo (matemática das urnas, sem hipótese)
@@ -215,6 +216,29 @@ export function renderMain(el, level, id, ctx) {
       escala < 1 ? h('p', { class: 'nota' }, `Barras ampliadas: o fim da barra é ${fP0(escala)}.`) : null));
   }
 
+  if (!r.exclusivos) {
+    const ds = ctx.distribuicao?.();
+    const cargoNomeY = (D.cargos.get(cy.cargo)?.nome || '').toLowerCase();
+    const caixa = camada(`Como os eleitores de ${X} votaram para ${cargoNomeY}`, 'c3');
+    if (!ds || ds.loading) caixa.append(h('div', { class: 'skel', style: { height: '120px' } }));
+    else if (ds.length) {
+      const fim = Math.max(...ds.map((d) => Math.max(d.modelos[1], d.demais[1])));
+      const esc = fim < 0.25 ? Math.max(fim * 1.3, 0.002) : 1;
+      const pc = (x) => `${Math.max(0, Math.min(100, (x / esc) * 100))}%`;
+      for (const d of ds) {
+        const c = candOf(d.key);
+        if (!c) continue;
+        const txt = Math.abs(d.modelos[1] - d.modelos[0]) < 0.005 ? `~${fP0(d.modelos[0])}` : `${fP0(d.modelos[0])}–${fP0(d.modelos[1])}`;
+        caixa.append(h('button', { type: 'button', class: 'ds-r' + (d.key === A.y ? ' on' : ''), onclick: () => ctx.onY(d.key), title: `Comparar com ${c.nome}` },
+          avatar(c, 26), h('span', { class: 'ds-n' }, c.nome),
+          h('span', { class: 'ds-b' }, h('i', { class: 'm', style: { left: pc(d.modelos[0]), width: `calc(${pc(Math.max(d.modelos[1], d.modelos[0] + esc * 0.012))} - ${pc(d.modelos[0])})` } }),
+            h('i', { class: 'd', style: { left: pc((d.demais[0] + d.demais[1]) / 2) }, title: `demais eleitores: ${fP0(d.demais[0])} a ${fP0(d.demais[1])}` })),
+          h('b', { class: 'ds-v tn' }, txt)));
+      }
+      caixa.append(h('p', { class: 'nota' }, `Estimativa nas duas hipóteses. O traço cinza é a taxa dos demais eleitores. Os principais candidatos do cargo; o resto vai para outros candidatos, brancos e nulos.${esc < 1 ? ` Escala ampliada até ${fP0(esc)}.` : ''}`));
+    }
+    frag.push(caixa);
+  }
   frag.push(h('p', { class: 'aviso' }, ICON.info(), h('span', null, 'O voto é secreto. Estes números vêm do resultado de cada urna, não de pessoas: limites certos, coincidências no mapa e estimativas. Coincidência não é causa nem transferência de votos.')));
 
   const ci = (k) => (r.ci?.[k] ? ` (${fR(r.ci[k][0])} a ${fR(r.ci[k][1])})` : '');

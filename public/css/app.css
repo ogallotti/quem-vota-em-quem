@@ -132,6 +132,13 @@ h1.hero em { font-style: italic; }
 .est-certo { background: rgba(106, 168, 245, 0.22); }
 .est-mod { background: var(--x); }
 .est-dem { background: #6b665e; }
+.ds-r { width: 100%; display: grid; grid-template-columns: 26px minmax(0, 1fr) minmax(70px, 1.1fr) 62px; gap: 8px; align-items: center; padding: 4px 2px; border: 0; background: none; text-align: left; border-radius: 8px; color: var(--ink); }
+.ds-r:hover, .ds-r.on { background: rgba(250, 250, 249, 0.05); }
+.ds-n { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ds-b { position: relative; height: 8px; border-radius: 4px; background: var(--s3); }
+.ds-b i.m { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: var(--x); min-width: 3px; }
+.ds-b i.d { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--ink-2); opacity: .7; }
+.ds-v { font-size: 12.5px; text-align: right; font-weight: 500; }
 .aviso { display: flex; gap: 8px; align-items: flex-start; margin: 14px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--muted); }
 .aviso svg { flex: none; margin-top: 2px; }
 /* barras "dos eleitores de X / dos demais" */

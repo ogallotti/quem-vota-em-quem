@@ -1,6 +1,6 @@
 // Liga dados e estatística: o par (X, Y) escolhido, valores por unidade em cada nível e a análise de cada recorte.
-import { D, cargoOf, denomOf, getProps, secsOf } from './data.js';
-import { analisa, encolhe, pearson, terco } from './stats.js';
+import { D, cargoOf, denomOf, getProps, loadCargo, secsOf } from './data.js';
+import { analisa, encolhe, pearson, respostaModelos, terco } from './stats.js';
 
 export const A = { x: null, y: null, X: null, Y: null, DX: null, DY: null, ver: 0, cache: new Map() };
 
@@ -148,3 +148,32 @@ export function territorio(level, id, fatia = 0.2) {
   });
 }
 
+
+/**
+ * Como os eleitores de X se dividiram entre os principais candidatos de um cargo (estimativa nas duas hipóteses), no
+ * recorte. Evita ler "votou mais em Y que os demais" como "a maioria votou em Y". Assíncrono: baixa o cargo inteiro.
+ */
+export function distribuicao(level, id, cargo, topN = 6) {
+  const k = `ds:${cargo}:${level}:${id}`;
+  if (A.cache.has(k)) return A.cache.get(k);
+  const ver = A.ver, x = A.x;
+  const p = loadCargo(cargo).then((series) => {
+    if (A.ver !== ver) return null;
+    const cands = (D.cargos.get(cargo)?.cands || []).filter((c) => c.key !== x).slice(0, topN);
+    const secs = secsOf(level, id), u = D.un.secao;
+    const lista = [];
+    for (const c of cands) {
+      const sp = series.get(c.key);
+      if (!sp) continue;
+      const Y = new Float64Array(D.n);
+      for (let j = 0; j < sp.s.length; j++) Y[sp.s[j]] = sp.v[j];
+      const r = analisa({ secs, grupo: u.idx, nG: u.ids.length, X: A.X, Y, DX: A.DX, DY: denomOf(c.key), exclusivos: exclusivos(x, c.key), B: 0 });
+      const m = respostaModelos(r);
+      if (m) lista.push({ key: c.key, modelos: m.modelos, demais: m.demais, py: r.py });
+    }
+    lista.sort((a, b) => b.modelos[0] + b.modelos[1] - a.modelos[0] - a.modelos[1]);
+    return lista;
+  });
+  A.cache.set(k, p);
+  return p;
+}
