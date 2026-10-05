@@ -283,15 +283,15 @@ function emComum(b, ctx) {
   const cx = candOf(A.x), cy = candOf(A.y), X = curto(cx.nome), Y = curto(cy.nome);
   const de = ctx.sentido === 'de';
   const seg = h('div', { class: 'seg seg-full' });
-  for (const [k, t] of [['de', ['Eleitores de ', sp('x', X)]], ['para', ['Votos de ', sp('y', Y)]]])
+  for (const [k, t] of [['de', ['Eleitores de ', sp('x', X)]], ['para', ['Eleitores de ', sp('y', Y)]]])
     seg.append(h('button', { type: 'button', class: k === ctx.sentido ? 'on' : '', onclick: () => ctx.onSentido(k) }, ...t));
   b.append(seg);
-  b.append(h('div', { class: 'sec-t' }, h('b', null, de ? `Os eleitores de ${X} votaram em quem?` : `Os eleitores de quem votaram em ${Y}?`), 'estimativa'));
+  b.append(h('div', { class: 'sec-t' }, h('b', null, de ? `Os eleitores de ${X} votaram em quem?` : `Que eleitorados mais coincidem com o de ${Y}?`), 'estimativa'));
   const cargoFixo = de ? cx.cargo : cy.cargo;
   const chips = h('div', { class: 'chips' });
   for (const c of D.cargos.keys()) if (c !== cargoFixo || c === 5) chips.append(h('button', { type: 'button', class: 'chip' + (c === ctx.comumCargo ? ' on' : ''), onclick: () => ctx.onComumCargo(c) }, cargoCurto(c)));
   b.append(chips);
-  // ordem só existe no sentido "votos de Y": lá a proporção e o número de eleitores contam histórias diferentes
+  // ordem só existe no sentido "eleitores de Y": lá a proporção e o número de eleitores contam histórias diferentes
   const porN = !de && ctx.ordem === 'n';
   if (!de) {
     const ord = h('div', { class: 'seg' });
