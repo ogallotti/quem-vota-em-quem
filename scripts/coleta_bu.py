@@ -159,11 +159,12 @@ def processa(uf, m, z, s, cache, sem_bu, guarda=True):
             if e.code == 404:  # seção agregada: os votos dela estão no boletim da seção principal
                 return chave
             raise
-        hs = [h for h in aux.get("hashes", []) if any(a["tp"] == "bu" for a in h["arq"])]
-        if not hs:
+        # "bu" = boletim da urna; "busa" = boletim do Sistema de Apuração (urna substituída ou voto em cédula): mesmo formato
+        tipo = next((t for t in ("bu", "busa") if any(a["tp"] == t for h in aux.get("hashes", []) for a in h["arq"])), None)
+        if not tipo:
             raise RuntimeError(f"seção {chave} sem BU (situação {aux.get('st')})")
-        h = hs[-1]  # o mais recente (seções com BU substituído trazem mais de um hash)
-        nome = next(a["nm"] for a in h["arq"] if a["tp"] == "bu")
+        h = [h for h in aux["hashes"] if any(a["tp"] == tipo for a in h["arq"])][-1]  # o mais recente
+        nome = next(a["nm"] for a in h["arq"] if a["tp"] == tipo)
         dados = get(f"{base}/{h['hash']}/{nome}")
         if not guarda:
             return decodifica(dados)
