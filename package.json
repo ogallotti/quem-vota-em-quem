@@ -7,7 +7,7 @@
     "coleta": ".venv/bin/python scripts/coleta_bu.py",
     "build:data": ".venv/bin/python scripts/build_data.py",
     "serve": "python3 -m http.server 4190 --directory public --bind 127.0.0.1",
-    "test": "node --test tests/",
+    "test": "node --test tests/*.test.mjs",
     "smoke": "node tests/smoke.mjs",
     "test:mobile": "node tests/mobile.mjs"
   },

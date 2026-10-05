@@ -21,7 +21,7 @@ jobs:
         with:
           node-version: 22
       # núcleo estatístico: não publica se a matemática quebrar
-      - run: node --test tests/
+      - run: node --test tests/*.test.mjs
 
   deploy:
     needs: testes
