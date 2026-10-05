@@ -160,9 +160,9 @@ const ctxSide = () => ({
   onMais: () => { state.mais = true; renderCards(); },
   onY: (k) => ctl.setY(k), onSelect: (l, i) => ctl.select(l, i),
   onPick: (lado) => abrirPicker(lado), onSwap: () => ctl.trocar(),
-  sentido: state.sentido, comumCargo: cargoComum(state.sentido), ordem: state.ordem, comum: pedirComum,
+  sentido: sentidoAtivo(), comumCargo: cargoComum(sentidoAtivo()), ordem: state.ordem, comum: pedirComum,
   onSentido: (s) => { state.sentido = s; renderCards(); },
-  onComumCargo: (c) => { state.comumCargo[state.sentido] = c; renderCards(); },
+  onComumCargo: (c) => { state.comumCargo[sentidoAtivo()] = c; renderCards(); },
   onOrdem: (o) => { state.ordem = o; renderCards(); },
   onX: (k) => ctl.setX(k),
   onSolo: () => ctl.setPar(state.x, null),
@@ -170,6 +170,8 @@ const ctxSide = () => ({
   posicao: () => { const { level, id } = state.sel, cargo = candOf(state.x)?.cargo; return assincrono('pos', `${state.x}|${level}:${id}`, () => posicao(state.x, cargo, level, id)); },
   sugestoesSolo: pedirSugestoesSolo,
 });
+/** Sentido da aba Em comum: sem Y só existe "eleitores de X". */
+function sentidoAtivo() { return state.y ? state.sentido : 'de'; }
 /** Modo de um candidato só: em quem mais votaram os eleitores de X no cargo "par natural" (estimativa). */
 function pedirSugestoesSolo() {
   const { level, id } = state.sel, cargo = cargoComum('de');
@@ -206,7 +208,7 @@ function cargoComum(sentido) {
   return [state.comumCargo[sentido], outro, parNatural(fixo)].find(ok) || [...D.cargos.keys()].find(ok);
 }
 function pedirComum() {
-  const s = state.y ? state.sentido : 'de', cargo = cargoComum(s), { level, id } = state.sel;
+  const s = sentidoAtivo(), cargo = cargoComum(s), { level, id } = state.sel;
   return s === 'de'
     ? assincrono('comum', `de|${A.ver}|${cargo}|${level}:${id}`, () => eleitoresDe(state.x, A.X, cargo, level, id))
     : assincrono('comum', `para|${A.ver}|${cargo}|${level}:${id}`, () => quemVotouEm(state.y, A.Y, cargo, level, id));
