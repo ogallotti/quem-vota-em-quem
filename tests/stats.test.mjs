@@ -1,7 +1,7 @@
 // Testes do núcleo estatístico com dados sintéticos de verdade conhecida.  node --test tests/
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { analisa, encolhe, faixa, forca, goodman, leitura, pearson, quantisPonderados, respostaEstimativa, terco } from '../public/js/stats.js';
+import { analisa, encolhe, faixa, forca, goodman, leitura, pearson, quantisPonderados, respostaEstimativa, respostaModelos, terco } from '../public/js/stats.js';
 
 // gerador determinístico (mulberry32)
 function rng(seed) {
@@ -173,4 +173,17 @@ test('a resposta vem da estimativa individual (e não da correlação)', () => {
   const an = analisa({ secs, grupo: secs, nG: n, X, Y, DX: D, DY: D });
   assert.ok(an.r < 0.35, `r ${an.r}`);
   assert.equal(respostaEstimativa(an.gd.est, an.gd.lo, an.gd.hi, an.gd.demais).k, 'sim');
+});
+
+test('duas hipóteses: a verdade simulada fica entre vizinhança e Goodman; direção só quando concordam', () => {
+  const { X, Y, D, grupo, secs } = simula(3000, 0.6, 0.2, 23);
+  const a = analisa({ secs, grupo, nG: secs.length, X, Y, DX: D, DY: D });
+  const m = respostaModelos(a);
+  assert.ok(m.modelos[0] <= 0.6 + 0.03 && m.modelos[1] >= 0.6 - 0.03, `faixa ${m.modelos}`);
+  assert.ok(a.viz.est >= a.lim.loF && a.viz.est <= a.lim.hiF);
+  assert.equal(m.k, 'sim');
+  // sem relação nenhuma: nenhuma das hipóteses afirma direção
+  const z = simula(3000, 0.3, 0.3, 29);
+  const az = analisa({ secs: z.secs, grupo: z.grupo, nG: z.secs.length, X: z.X, Y: z.Y, DX: z.D, DY: z.D });
+  assert.equal(respostaModelos(az).k, 'igual');
 });

@@ -45,14 +45,6 @@ export async function loadBR() {
   return b;
 }
 
-/** Municípios do Brasil inteiro (mapa nacional Lula × Bolsonaro), depois do primeiro desenho. */
-export async function loadBrMun() {
-  if (BR.mun) return BR.mun;
-  const b = await getOnce('data/br-mun.json');
-  BR.mun = fc(b.mun.map(([id, uf, n, g, lx, ly, esq, dir, cp]) => feat(dq(g, b.q), { id, uf, n, lx, ly, esq, dir, cp })));
-  return BR.mun;
-}
-
 /** Índice nacional de candidatos (busca), só quando a pessoa vai buscar. */
 export async function loadCands() {
   if (BR.cands) return BR.cands;

@@ -88,15 +88,3 @@ export function luminance(hex) {
   const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
   return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
 }
-
-// Lula × Bolsonaro (mapa do Brasil): margem de Lula sobre o voto dado aos dois, do vermelho (Lula) ao azul (Bolsonaro)
-export const LADO = ['#b4232a', '#e5484d', '#f19a9b', '#e6e3de', '#9fb2f7', '#4c6ef5', '#2a43b3'];
-const LADO_CORTES = [0.3, 0.15, 0.05, -0.05, -0.15, -0.3];
-/** Classe da margem de Lula ((Lula − Bolsonaro) ÷ (Lula + Bolsonaro)). */
-export function classeLado(esq, dir) {
-  const t = esq + dir;
-  if (!(t > 0)) return -1;
-  const m = (esq - dir) / t;
-  for (let i = 0; i < LADO_CORTES.length; i++) if (m > LADO_CORTES[i]) return i;
-  return LADO_CORTES.length;
-}

@@ -1,13 +1,13 @@
 // Controlador: Brasil ↔ estado, par (X, Y), lente, recorte, carga sob demanda, endereço compartilhável, teclado e
 // gaveta do celular. Zero backend: só arquivos estáticos.
 import { A, porUnidade, rPorUnidade, recorte, setPar, unidadesNoRecorte, valorDe } from './analise.js';
-import { BR, D, LEVEL_INFO, candOf, focusGeometry, getProps, loadAf, loadBR, loadBrMun, loadCands, loadMunPolys, loadNomes, loadSerie, loadUF, loadZB, munOf, parentChain } from './data.js';
+import { BR, D, LEVEL_INFO, candOf, focusGeometry, getProps, loadAf, loadBR, loadCands, loadMunPolys, loadNomes, loadSerie, loadUF, loadZB, munOf, parentChain } from './data.js';
 import { abrirBusca, buscaAberta, fecharBusca } from './busca.js';
 import { clear, h } from './fmt.js';
 import { MapView } from './map.js';
 import { quemTrouxe } from './ranking.js';
 import { Tooltip, classeBiv, renderCrumbs, renderLegend, renderMain, renderMainBR, renderSide, renderSideBR } from './panel.js';
-import { BIV, DIV, LADO, LENTES, NOVOTE, RAMP, SEM_DADO, YX, classeLado, classeR, classeSeq, classesSeq } from './scales.js';
+import { BIV, DIV, LENTES, NOVOTE, RAMP, SEM_DADO, YX, classeR, classeSeq, classesSeq } from './scales.js';
 import { faixa, quantis, quantisPonderados, terco } from './stats.js';
 import { ICON } from './ui.js';
 
@@ -74,10 +74,11 @@ function writeHash() {
 }
 
 // ------------------------------------------------------------------ pintura
+/** Brasil: mapa neutro (sem leitura partidária); estados com dados em tom claro, clique abre o estado. */
 function pintarBR() {
-  const porId = { uf: new Map(BR.states.features.map((f) => [f.properties.id, f.properties])), brmun: new Map((BR.mun?.features || []).map((f) => [f.properties.id, f.properties])) };
-  view.setPaint({ palette: LADO, none: SEM_DADO, k: (lv, id) => { const p = porId[lv]?.get(id); return p ? classeLado(p.esq, p.dir) : -1; }, label: () => '' });
-  renderLegend($('legend'), { lente: 'br' });
+  const porId = new Map(BR.states.features.map((f) => [f.properties.id, f.properties]));
+  view.setPaint({ palette: ['#34312c', '#24221f'], none: '#24221f', k: (lv, id) => (porId.get(id)?.ok ? 0 : 1), label: () => '' });
+  $('legend').hidden = true;
 }
 
 function pintar() {
@@ -142,6 +143,7 @@ function pintar() {
 }
 
 function legenda() {
+  $('legend').hidden = false;
   if (state.modo !== 'uf' || !state.seq) return;
   const { level: sl, id: si } = state.sel, lente = state.lente;
   renderLegend($('legend'), { lente, classes: lente === 'x' || lente === 'y' ? state.seq(view.view?.poly || 'municipio') : null, escopo: sl === 'estado' ? 'do estado' : `de ${getProps(sl, si)?.n || ''}` });
@@ -223,9 +225,11 @@ const ctl = {
     const pk = D.meta.polos || {};
     const gov = D.cargos.get(3)?.cands[0]?.key || [...D.cand.keys()][0];
     x = x && candOf(x) ? x : state.x && !trocou && state.modo === 'uf' ? state.x : gov;
-    y = y && candOf(y) && y !== x ? y : (pk.esq && pk.esq !== x ? pk.esq : pk.dir);
-    const [X, Y, E, Dr] = await Promise.all([loadSerie(x), loadSerie(y), pk.esq ? loadSerie(pk.esq) : null, pk.dir ? loadSerie(pk.dir) : null]);
-    polos = { esq: E && { key: pk.esq, serie: E }, dir: Dr && { key: pk.dir, serie: Dr } };
+    // par padrão só com disputas do estado (governador × senador mais votados); presidente só se a pessoa escolher
+    const padraoY = [D.cargos.get(5)?.cands[0]?.key, D.cargos.get(3)?.cands[1]?.key, D.cargos.get(6)?.cands[0]?.key].find((k) => k && k !== x);
+    y = y && candOf(y) && y !== x ? y : padraoY;
+    const [X, Y] = await Promise.all([loadSerie(x), loadSerie(y)]);
+    polos = { esq: pk.esq && { key: pk.esq }, dir: pk.dir && { key: pk.dir } }; // só para os atalhos do seletor
     Object.assign(state, { modo: 'uf', x, y, afCargo: null, mais: false });
     if (lente && LENTES[lente]) state.lente = lente;
     setPar(x, X, y, Y);
@@ -426,7 +430,6 @@ async function boot() {
     // depois do primeiro desenho: municípios do Brasil e índice nacional de candidatos
     const idle = window.requestIdleCallback || ((f) => setTimeout(f, 200));
     idle(() => {
-      loadBrMun().then(() => { view.addLevel('brmun'); if (state.modo === 'br') pintarBR(); }).catch(() => {});
       loadCands().then((cs) => { sugestoes = cs.slice().sort((a, b) => b.votos - a.votos).filter((c) => c.cargo !== 1).slice(0, 8); if (state.modo === 'br') renderCards(); }).catch(() => {});
     });
   } catch (err) {

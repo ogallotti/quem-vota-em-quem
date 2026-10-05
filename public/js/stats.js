@@ -182,6 +182,17 @@ export function analisa({ secs, grupo, nG, cluster = null, X, Y, DX, DY, exclusi
       const bruto = p.a + p.b;
       out.gd = { est: p.est, demais: p.demais, a: p.a, b: p.b, raw: bruto, fora: bruto < out.lim.loF - 1e-9 || bruto > out.lim.hiF + 1e-9 };
     }
+    // segunda hipótese, "vizinhança": o eleitor de X vota em Y como os demais eleitores da MESMA urna (nenhum efeito
+    // individual além do lugar). Goodman supõe o oposto (todo o padrão entre urnas é efeito individual). A verdade
+    // costuma ficar entre as duas; ambas presas, urna a urna, aos limites certos.
+    if (tx > 0) {
+      let comum = 0, tN = 0;
+      for (let i = 0; i < U.x.length; i++) {
+        tN += U.N[i];
+        if (U.vx[i] > 0) comum += Math.min(U.hi[i] / U.vx[i], Math.max(U.lo[i] / U.vx[i], U.y[i])) * U.vx[i];
+      }
+      out.viz = { est: comum / tx, demais: tN - tx > 0 ? Math.min(1, Math.max(0, (ty - comum) / (tN - tx))) : null };
+    }
   }
   // bootstrap em blocos: reamostra municípios (se houver 8 ou mais) ou as próprias unidades
   const n = U.x.length;
@@ -289,4 +300,21 @@ export function respostaEstimativa(est, lo, hi, demais) {
   if (L > demais * 1.1 && L - demais > 0.01) return { k: 'sim', forte: est >= demais * 1.5, impreciso, vezes: demais > 0 ? est / demais : null };
   if (H < demais / 1.1 && demais - H > 0.01) return { k: 'nao', forte: est <= demais / 1.5, impreciso };
   return { k: 'igual', impreciso };
+}
+
+/**
+ * Resposta com as duas hipóteses (Goodman e vizinhança). Só afirma uma direção quando as duas concordam (ou uma
+ * concorda e a outra é neutra); se apontam para lados opostos, "diverge" (não dá para afirmar).
+ */
+export function respostaModelos(r) {
+  if (!r?.gd || !r?.viz) return null;
+  const g = respostaEstimativa(r.gd.est, r.gd.lo, r.gd.hi, r.gd.demais);
+  const dv = r.viz.demais;
+  const v = dv == null ? 'igual' : r.viz.est > dv * 1.1 ? 'sim' : r.viz.est < dv / 1.1 ? 'nao' : 'igual';
+  const k = g.k === v ? g.k : g.k === 'igual' ? v : v === 'igual' ? g.k : 'diverge';
+  const razao = (e, d) => (d > 0 ? e / d : null);
+  const rg = razao(r.gd.est, r.gd.demais), rv = razao(r.viz.est, dv);
+  const forte = k === 'sim' ? Math.min(rg ?? 0, rv ?? 0) >= 1.5 : k === 'nao' ? Math.max(rg ?? 9, rv ?? 9) <= 1 / 1.5 : false;
+  const lo = Math.min(r.gd.est, r.viz.est), hi = Math.max(r.gd.est, r.viz.est);
+  return { k, forte, impreciso: g.impreciso, modelos: [lo, hi], demais: [Math.min(r.gd.demais ?? 0, dv ?? 0), Math.max(r.gd.demais ?? 0, dv ?? 0)] };
 }

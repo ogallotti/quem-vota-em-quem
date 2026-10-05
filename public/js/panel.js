@@ -1,10 +1,10 @@
 // Cartões da interface: a pergunta e a resposta (esquerda), "anda junto / onde / pontos" (direita), a tela inicial do
 // Brasil, a legenda, a trilha e a dica do mapa. Texto dos dados entra sempre por textContent (h()).
-import { A, lado, rPorUnidade, recorte, territorio, valorDe } from './analise.js';
+import { A, rPorUnidade, recorte, territorio, valorDe } from './analise.js';
 import { BR, D, LEVEL_INFO, candOf, cargoOf, childrenOf, entityName, getProps, parentChain } from './data.js';
 import { clear, fInt, fPct, h } from './fmt.js';
-import { BIV, BIV_TXT, DIV, LADO, SEM_DADO, YX } from './scales.js';
-import { leitura, respostaEstimativa, terco } from './stats.js';
+import { BIV, BIV_TXT, DIV, SEM_DADO, YX } from './scales.js';
+import { leitura, respostaModelos, terco } from './stats.js';
 import { ICON, avatar, cargoCurto, chipCand, curto, situacao } from './ui.js';
 
 const nf2 = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -15,6 +15,8 @@ const fP = (x) => (x == null ? '—' : fPct(x * 100));
 const fP0 = (x) => (x == null ? '—' : x >= 0.095 ? `${Math.round(x * 100)}%` : `${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: x >= 0.0095 ? 1 : 2 }).format(x * 100)}%`);
 const fPP = (x) => `${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 }).format(Math.abs(x * 100))} pontos`;
 const nomeCand = (key) => candOf(key)?.nome || '';
+// 1.258.000 → "1,26 milhão"; 12.556 → "12,6 mil"; abaixo de mil, o número exato
+const fCompacto = (n) => (n >= 1e6 ? `${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 }).format(n / 1e6)} ${n >= 2e6 ? 'milhões' : 'milhão'}` : n >= 1e4 ? `${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: n >= 1e5 ? 0 : 1 }).format(n / 1e3)} mil` : fInt(n));
 const sp = (cls, txt) => h('span', { class: cls }, txt);
 
 /** Classe bivariada de uma unidade (proporções encolhidas) em relação às médias do recorte. */
@@ -40,11 +42,9 @@ export class Tooltip {
     const key = `br:${nivel}:${p.id}`;
     if (key !== this.last) {
       this.last = key;
-      const t = p.esq + p.dir;
-      clear(this.el).append(h('div', { class: 'tip-h' }, nivel === 'uf' ? 'Estado' : `Município · ${String(p.uf).toUpperCase()}`),
-        h('div', { class: 'tip-n' }, p.n),
-        this.linha('Lula', t ? fP(p.esq / t) : '—'), this.linha('Flávio Bolsonaro', t ? fP(p.dir / t) : '—'),
-        h('div', { class: 'tip-f' }, nivel === 'uf' && !p.ok ? 'Dados do estado ainda em processamento' : 'Presidente, só entre os dois · clique para abrir'));
+      clear(this.el).append(h('div', { class: 'tip-h' }, 'Estado'), h('div', { class: 'tip-n' }, p.n),
+        this.linha('Compareceram', fInt(p.cp)),
+        h('div', { class: 'tip-f' }, p.ok ? 'Clique para abrir' : 'Dados em processamento'));
     }
     this._place(point);
   }
@@ -76,12 +76,6 @@ export class Tooltip {
 export function renderLegend(el, { lente, classes, escopo }) {
   clear(el);
   el.hidden = false;
-  if (lente === 'br') {
-    el.append(h('div', { class: 'lg-t' }, h('b', null, 'Lula × Flávio Bolsonaro'), ' · presidente'),
-      h('div', { class: 'lg-ramp' }, ...LADO.map((c) => h('i', { style: { background: c } }))),
-      h('div', { class: 'lg-ends' }, h('span', null, 'Lula +30'), h('span', null, 'empate'), h('span', null, 'Bolsonaro +30')));
-    return;
-  }
   if (lente === 'yx') {
     const X = curto(nomeCand(A.x)), Y = curto(nomeCand(A.y));
     const g = h('div', { class: 'yx-g', role: 'img', 'aria-label': `Legenda: luz = ${Y}, cor = ${X}` });
@@ -135,46 +129,6 @@ export function renderCrumbs(el, level, id, onGo) {
   });
 }
 
-// ------------------------------------------------------------------ a resposta em palavras
-function veredito(r, escopo) {
-  const X = curto(nomeCand(A.x)), Y = curto(nomeCand(A.y));
-  const nx = () => sp('x', X), ny = () => sp('y', Y);
-  const l = r.r == null && r.lift == null ? { k: 'nd' } : leitura(r.r, r.lift, r.ci);
-  const linhas = [];
-  let titulo;
-  const est = !r.exclusivos && r.gd ? respostaEstimativa(r.gd.est, r.gd.lo, r.gd.hi, r.gd.demais) : null;
-  if (r.exclusivos) {
-    titulo = l.k === 'pos' ? [nx(), ' e ', ny(), ' disputam os mesmos lugares.'] : l.k === 'neg' ? [nx(), ' e ', ny(), ' têm territórios diferentes.'] : [nx(), ' e ', ny(), ' não disputam o mesmo território.'];
-    linhas.push('Os dois concorrem à mesma vaga: cada eleitor vota em um só. A pergunta passa a ser se buscam voto nos mesmos lugares.');
-  } else if (est) {
-    // a manchete responde a pergunta do site: os eleitores de X votaram em Y mais (ou menos) que os demais?
-    titulo = {
-      sim: est.forte ? ['Sim. Os eleitores de ', nx(), ' votaram em ', ny(), ' bem mais que os demais.'] : ['Sim. Os eleitores de ', nx(), ' votaram um pouco mais em ', ny(), ' que os demais.'],
-      nao: est.forte ? ['Não. Os eleitores de ', nx(), ' votaram bem menos em ', ny(), ' que os demais.'] : ['Não. Os eleitores de ', nx(), ' votaram um pouco menos em ', ny(), ' que os demais.'],
-      igual: ['Não dá para dizer. Os eleitores de ', nx(), ' votaram em ', ny(), ' como os demais, dentro da margem.'],
-    }[est.k];
-    if (est.impreciso) linhas.push(`Estimativa imprecisa (faixa provável de ${fP0(r.gd.lo)} a ${fP0(r.gd.hi)}): leia como ordem de grandeza.`);
-    // a correlação fala do mapa; para um X pequeno ela sai baixa mesmo quando os eleitores dele votam em peso em Y
-    if (r.r != null) {
-      if (r.r >= 0.2) linhas.push(`No mapa, os votos dos dois também coincidem (correlação ${fR(r.r)}).`);
-      else if (r.r <= -0.2) linhas.push(`No mapa, os dois têm bases em lugares diferentes (correlação ${fR(r.r)}).`);
-      else if (est.k === 'sim' && r.px < 0.1) linhas.push(`No mapa, os votos dos dois quase não coincidem (correlação ${fR(r.r)}): ${X} tem poucos votos em cada urna, então mesmo uma preferência forte dos eleitores dele mexe pouco no resultado de ${Y}.`);
-    }
-  } else {
-    titulo = {
-      pos: [null, ['Pouco. A sobreposição entre ', nx(), ' e ', ny(), ' é fraca.'], ['Em parte. Os votos de ', nx(), ' e ', ny(), ' se sobrepõem.'], ['Sim. Onde ', nx(), ' é forte, ', ny(), ' também é.']][l.nivel],
-      neg: [null, ['Não muito. Há uma leve tendência ao contrário.'], ['Não. Onde ', nx(), ' é forte, ', ny(), ' tende a ser fraco.'], ['Não. ', nx(), ' e ', ny(), ' têm bases em lugares diferentes.']][l.nivel],
-      zero: ['Não há relação entre os votos de ', nx(), ' e de ', ny(), '.'],
-      inc: ['Inconclusivo: o sinal não se distingue do acaso.'],
-      mix: ['Sinais mistos: veja os pontos.'], nd: ['Sem dados suficientes.'],
-    }[l.k];
-    if (r.yx != null) linhas.push(`Onde vota o eleitor de ${X}, ${Y} faz ${fP(r.yx)} dos votos; ${escopo.em}, ${fP(r.py)}.`);
-  }
-  if (r.r != null && r.rw != null && r.r >= 0.2 && Math.abs(r.rw) < 0.1) linhas.push(`Dentro de cada um dos ${r.blocos}, porém, os dois não andam juntos: parte da coincidência é regional.`);
-  if (r.n < 20) linhas.push(`Só ${r.n} seções no recorte: leitura frágil.`);
-  return { l, titulo, linhas };
-}
-
 /** Barra 0–100% com o intervalo provável. */
 function barra(v, ic, cls = '', escala = 1) {
   const pct = (x) => `${Math.max(0, Math.min(100, (x / escala) * 100))}%`;
@@ -191,76 +145,94 @@ export function renderMain(el, level, id, ctx) {
   const escopo = level === 'estado' ? { em: 'no estado', de: 'do estado' } : { em: `em ${nome}`, de: `de ${nome}` };
   const cx = candOf(A.x), cy = candOf(A.y);
   const X = curto(cx.nome), Y = curto(cy.nome);
-  const v = veredito(r, escopo);
+  const nx = () => sp('x', X), ny = () => sp('y', Y);
+  const m = r.exclusivos ? null : respostaModelos(r);
   const frag = [];
   frag.push(h('div', { class: 'eyebrow' }, h('b', null, D.meta.uf_nome), h('span', null, '·'), h('span', null, '1º turno 2026'), level !== 'estado' ? [h('span', null, '·'), h('b', null, nome)] : null));
-  const polo = D.meta.polos?.esq === cy.key ? 'esquerda' : D.meta.polos?.dir === cy.key ? 'direita' : '';
   frag.push(h('div', { class: 'q' },
     h('div', { class: 'q-row' }, h('p', { class: 'q-l' }, 'Quem vota em'), h('button', { class: 'q-swap', type: 'button', onclick: ctx.onSwap, title: 'Inverter (I)' }, ICON.trocar(), 'inverter')),
     chipCand('x', cx, { onClick: () => ctx.onPick('x'), rotulo: 'X' }),
-    h('p', { class: 'q-l' }, polo ? `também vota na ${polo}?` : 'também vota em'),
+    h('p', { class: 'q-l' }, 'também vota em'),
     chipCand('y', cy, { onClick: () => ctx.onPick('y'), rotulo: 'Y' })));
-  frag.push(h('div', { class: 'answer' }, h('h2', { class: 'verdict' }, ...v.titulo), ...v.linhas.map((t) => h('p', { class: 'verdict-s' }, t))));
 
-  if (!r.exclusivos && r.gd) {
-    // candidatos pequenos: a barra de 0 a 100% esconderia a diferença; amplia a escala e avisa
-    const topo = Math.max(r.gd.hi ?? r.gd.est, r.gd.est, r.gd.demais);
-    const escala = topo < 0.25 ? Math.max(topo * 1.35, 0.002) : 1;
-    // "x vezes mais" só quando até o piso da faixa provável fica acima dos demais
-    const vezes = r.gd.demais > 0 && (r.gd.lo ?? r.gd.est) > r.gd.demais ? r.gd.est / r.gd.demais : null;
-    frag.push(h('div', { class: 'bars' },
-      h('div', null, h('div', { class: 'bar-l' }, h('span', null, 'Dos eleitores de ', sp('x', X)), h('b', { class: 'tn' }, `~${fP0(r.gd.est)}`)), barra(r.gd.est, r.gd.lo != null ? [r.gd.lo, r.gd.hi] : null, '', escala)),
-      h('div', null, h('div', { class: 'bar-l' }, h('span', null, 'Dos demais eleitores'), h('b', { class: 'tn' }, `~${fP0(r.gd.demais)}`)), barra(r.gd.demais, null, 'demais', escala)),
-      h('div', { class: 'small muted' }, `votaram em ${Y} (estimativa${r.gd.lo != null ? `; faixa provável ${fP0(r.gd.lo)} a ${fP0(r.gd.hi)}, o traço sobre a barra` : ''})${vezes && vezes >= 1.5 ? `: ${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 }).format(vezes)} vezes a taxa dos demais` : ''}.${escala < 1 ? ` Barras ampliadas: o fim da barra é ${fP0(escala)}.` : ''}`)));
+  // ---- manchete: cautelosa ("parecem"), e só afirma direção quando as duas hipóteses concordam
+  let titulo;
+  if (r.exclusivos) {
+    const l = r.r == null ? { k: 'nd' } : leitura(r.r, r.lift, r.ci);
+    titulo = l.k === 'pos' ? [nx(), ' e ', ny(), ' disputam votos nos mesmos lugares.'] : l.k === 'neg' ? [nx(), ' e ', ny(), ' têm territórios diferentes.'] : [nx(), ' e ', ny(), ' não disputam o mesmo território.'];
+  } else if (!m) titulo = ['Sem dados suficientes neste recorte.'];
+  else titulo = {
+    sim: ['Os eleitores de ', nx(), ` parecem ter votado ${m.forte ? 'bem mais' : 'um pouco mais'} em `, ny(), ' que os demais.'],
+    nao: ['Os eleitores de ', nx(), ` parecem ter votado ${m.forte ? 'bem menos' : 'um pouco menos'} em `, ny(), ' que os demais.'],
+    igual: ['Os eleitores de ', nx(), ' parecem ter votado em ', ny(), ' como os demais.'],
+    diverge: ['Não dá para afirmar se os eleitores de ', nx(), ' votaram mais ou menos em ', ny(), ' que os demais.'],
+  }[m.k];
+  frag.push(h('div', { class: 'answer' }, h('h2', { class: 'verdict' }, ...titulo)));
+
+  // ---- 1. o que é certo (matemática das urnas, sem hipótese)
+  const camada = (rot, cls, ...filhos) => h('section', { class: `camada ${cls}` }, h('div', { class: 'camada-t' }, rot), ...filhos);
+  if (r.exclusivos) {
+    frag.push(camada('Certo, pelas urnas', 'c1', h('p', null, `${X} e ${Y} disputam a mesma vaga: cada eleitor vota em um só, então ninguém votou nos dois. A pergunta passa a ser se disputam os mesmos lugares.`)));
+  } else if (r.lim && r.tx > 0) {
+    frag.push(camada('Certo, pelas urnas', 'c1',
+      h('p', null, `Dos ${fInt(r.tx)} votos de ${X}, `, h('b', null, `entre ${fInt(r.lim.lo)} (${fP0(r.lim.loF)}) e ${fInt(r.lim.hi)} (${fP0(r.lim.hiF)})`), ` vieram de eleitores que também votaram em ${Y}.`),
+      h('p', { class: 'nota' }, r.lim.lo > 0 ? 'Não é estimativa: em cada urna, quem votou nos dois não passa do menor dos dois números nem fica abaixo da soma dos dois menos o comparecimento.' : 'Não é estimativa: em cada urna, quem votou nos dois não passa do menor dos dois números. O mínimo certo é zero.')));
+  }
+
+  // ---- 2. o que o mapa mostra (coincidência, não causa)
+  const linhasMapa = [];
+  if (r.r != null) {
+    if (r.r >= 0.2) linhasMapa.push(`Onde ${X} foi melhor, ${Y} também foi (correlação ${fR(r.r)}).`);
+    else if (r.r <= -0.2) linhasMapa.push(`Onde ${X} foi melhor, ${Y} foi pior (correlação ${fR(r.r)}).`);
+    else linhasMapa.push(`Os votos dos dois quase não coincidem no mapa (correlação ${fR(r.r)})${r.px < 0.1 && m?.k === 'sim' ? `: ${X} tem poucos votos em cada urna, então mesmo uma preferência forte dos eleitores dele mexe pouco no resultado de ${Y}` : ''}.`);
+    if (Math.abs(r.r) >= 0.2 && r.rw != null) linhasMapa.push(Math.abs(r.rw) < 0.1 ? `Dentro de cada um dos ${r.blocos}, porém, quase não há relação: boa parte da coincidência é regional.` : `O padrão se repete dentro dos ${r.blocos} (${fR(r.rw)}), não é só regional.`);
   }
   const tt = territorio(level, id);
   if (tt.n > 1 && tt.eleitores > 0.05) {
-    const peso = tt.votosY / tt.eleitores;
-    const fx = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 }).format(peso);
-    const leitura = peso >= 1.2 ? `: ${fx}× o esperado se não houvesse relação.` : peso >= 1.05 ? `: um pouco acima do esperado (${fP0(tt.eleitores)}).` : peso > 0.95 ? `: o esperado se não houvesse relação (${fP0(tt.eleitores)}).` : peso > 0.83 ? `: um pouco abaixo do esperado (${fP0(tt.eleitores)}).` : `: menos que o esperado (${fP0(tt.eleitores)}); ${Y} vai melhor fora delas.`;
-    frag.push(h('p', { class: 'terr' }, `No mapa: as ${fInt(tt.n)} seções onde ${X} é mais forte (`, h('b', null, fP0(tt.eleitores)), ' dos eleitores) deram ',
-      h('b', { class: 'x' }, fP0(tt.votosX)), ` dos votos de ${X} e `, h('b', { class: 'y' }, fP0(tt.votosY)), ` dos de ${Y}`, leitura));
+    const peso = tt.votosY / tt.eleitores, fx = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 }).format(peso);
+    const leit = peso >= 1.2 ? `${fx}× o peso dessas seções no eleitorado` : peso >= 1.05 ? 'um pouco acima do peso dessas seções no eleitorado' : peso > 0.95 ? 'o mesmo que o peso dessas seções no eleitorado' : peso > 0.83 ? 'um pouco abaixo do peso dessas seções no eleitorado' : 'bem abaixo do peso dessas seções no eleitorado';
+    linhasMapa.push(`As seções onde ${X} é mais forte reúnem ${fP0(tt.eleitores)} dos eleitores e deram ${fP0(tt.votosY)} dos votos de ${Y}: ${leit}.`);
   }
-  const cR = (x) => (x == null ? '—' : sp(x > 0.1 ? 'pos' : x < -0.1 ? 'neg' : '', fR(x)));
-  frag.push(h('div', { class: 'stats' },
-    stat('Correlação', cR(r.r), r.rw != null ? h('span', null, `nos ${r.blocos}: `, fR(r.rw)) : `${fInt(r.n)} seções`,
-      'De −1 a 1: os votos dos dois sobem e descem juntos de um local de votação para outro? "Nos municípios" desconta a média de cada cidade: separa coincidência regional de eleitorado comum.'),
-    stat('Afinidade', fX(r.lift), `${Y} onde ${X} vota ÷ média`, 'Quanto Y faz no lugar médio onde vota o eleitor de X, dividido pela média de Y no recorte. 1,00× = indiferente; 2× = o dobro; 0,5× = a metade.'),
-    r.lim ? stat('Teto certo', fInt(r.lim.hi), `votos de ${Y} podem ter vindo de quem votou em ${X}`, 'Em cada urna, quem votou nos dois não passa do menor dos dois números. Somando as urnas, este é o máximo possível. Não é estimativa: é certo.')
-      : stat('Nos municípios', cR(r.rw), 'correlação descontada a média de cada cidade', 'Correlação depois de tirar a média de cada município.')));
+  if (linhasMapa.length) frag.push(camada('O que o mapa mostra', 'c2', ...linhasMapa.map((t) => h('p', null, t)),
+    h('p', { class: 'nota' }, 'Coincidência no mapa não é causa: dois candidatos podem ser fortes nos mesmos lugares por razões próprias.')));
 
-  // esquerda × direita
-  const pl = ctx.polos;
-  if (pl?.esq && pl?.dir && A.x !== pl.esq.key && A.x !== pl.dir.key) {
-    const ld = lado(level, id, pl.esq.serie, pl.dir.serie);
-    if (ld.doX != null) {
-      const pos = (x) => `${Math.max(0, Math.min(100, x * 100))}%`;
-      const dif = ld.dif;
-      frag.push(h('div', { class: 'lado' },
-        h('div', { class: 'sec-t' }, h('b', null, `Para que lado pende o eleitor de ${X}?`)),
-        h('div', { class: 'lado-bar' }, h('i', { class: 'e', style: { width: pos(ld.doX) } }), h('i', { class: 'd' }),
-          h('b', { class: 'mk m', style: { left: pos(ld.media) }, title: `Média ${escopo.de}` }), h('b', { class: 'mk x', style: { left: pos(ld.doX) }, title: `Onde vota o eleitor de ${X}` })),
-        h('div', { class: 'lado-leg tn' }, h('span', { class: 'e' }, `Lula ${fP0(ld.doX)}`), h('span', { class: 'd' }, `${fP0(1 - ld.doX)} Bolsonaro`)),
-        h('p', null, Math.abs(dif) < 0.02 ? `Igual ao eleitorado ${escopo.de}.` : `${fPP(dif)} mais ${dif > 0 ? 'à esquerda' : 'à direita'} que o eleitorado ${escopo.de} (o risco cinza é a média).`,
-          ' ', h('button', { class: 'q-swap', type: 'button', onclick: () => ctx.onY(dif > 0 ? pl.esq.key : pl.dir.key) }, `comparar com ${dif > 0 ? 'Lula' : 'Bolsonaro'} →`))));
-    }
+  // ---- 3. o que se estima (depende de hipótese: mostra as duas)
+  if (m && r.lim) {
+    const topo = Math.max(m.modelos[1], m.demais[1], r.lim.hiF < 0.25 ? r.lim.hiF : 0);
+    const escala = topo < 0.25 ? Math.max(topo * 1.3, 0.002) : 1;
+    const pct = (x) => `${Math.max(0, Math.min(100, (x / escala) * 100))}%`;
+    const faixa = (lo, hi, cls, t) => h('span', { class: cls, style: { left: pct(lo), width: `calc(${pct(hi)} - ${pct(lo)})` }, title: t });
+    const barraM = (rot, val, extra) => h('div', { class: 'est-r' }, h('div', { class: 'bar-l' }, h('span', null, ...rot), h('b', { class: 'tn' }, val)), h('div', { class: 'est-bar' }, ...extra));
+    const rotulo = (a, b) => (Math.abs(a - b) < 0.005 ? `~${fP0(a)}` : `${fP0(a)} a ${fP0(b)}`);
+    frag.push(camada('O que se estima', 'c3',
+      barraM(['Dos eleitores de ', nx()], rotulo(m.modelos[0], m.modelos[1]), [
+        faixa(r.lim.loF, Math.min(r.lim.hiF, escala), 'est-certo', `limite certo: ${fP0(r.lim.loF)} a ${fP0(r.lim.hiF)}`),
+        faixa(m.modelos[0], Math.max(m.modelos[1], m.modelos[0] + escala * 0.012), 'est-mod', `entre as duas hipóteses: ${fP0(m.modelos[0])} a ${fP0(m.modelos[1])}`)]),
+      barraM(['Dos demais eleitores'], rotulo(m.demais[0], m.demais[1]), [faixa(m.demais[0], Math.max(m.demais[1], m.demais[0] + escala * 0.012), 'est-dem', 'demais eleitores')]),
+      h('p', null, `votaram em ${Y} (cerca de ${fCompacto(m.modelos[0] * r.tx)} a ${fCompacto(m.modelos[1] * r.tx)} eleitores de ${X}). As duas pontas vêm de hipóteses diferentes: o eleitor de ${X} vota como os vizinhos da mesma urna, ou todo o padrão entre urnas é preferência dele. A verdade costuma ficar entre elas; a faixa clara é o limite certo.`),
+      m.k === 'diverge' ? h('p', { class: 'nota warn' }, 'As duas hipóteses apontam em sentidos opostos: não dá para afirmar a direção.') : null,
+      m.impreciso ? h('p', { class: 'nota warn' }, `A regressão é imprecisa aqui (faixa provável ${fP0(r.gd.lo)} a ${fP0(r.gd.hi)}): leia como ordem de grandeza.`) : null,
+      escala < 1 ? h('p', { class: 'nota' }, `Barras ampliadas: o fim da barra é ${fP0(escala)}.`) : null));
   }
+
+  frag.push(h('p', { class: 'aviso' }, ICON.info(), h('span', null, 'O voto é secreto. Estes números vêm do resultado de cada urna, não de pessoas: limites certos, coincidências no mapa e estimativas. Coincidência não é causa nem transferência de votos.')));
 
   const ci = (k) => (r.ci?.[k] ? ` (${fR(r.ci[k][0])} a ${fR(r.ci[k][1])})` : '');
   frag.push(h('details', { class: 'more' }, h('summary', null, 'Números completos e como ler'),
     h('div', { class: 'more-b' },
       h('div', { class: 'kv' }, h('span', null, `Votos de ${X}`), h('b', { class: 'tn' }, `${fInt(r.tx)} (${fP(r.px)})`)),
       h('div', { class: 'kv' }, h('span', null, `Votos de ${Y}`), h('b', { class: 'tn' }, `${fInt(r.ty)} (${fP(r.py)})`)),
+      r.lim ? h('div', { class: 'kv' }, h('span', null, 'Votos em comum (certo)'), h('b', { class: 'tn' }, `${fInt(r.lim.lo)} a ${fInt(r.lim.hi)}`)) : null,
+      r.gd ? h('div', { class: 'kv' }, h('span', null, 'Regressão (Goodman)'), h('b', { class: 'tn' }, `${fP(r.gd.est)}${r.gd.lo != null ? ` (${fP0(r.gd.lo)} a ${fP0(r.gd.hi)})` : ''}`)) : null,
+      r.viz ? h('div', { class: 'kv' }, h('span', null, 'Vizinhança'), h('b', { class: 'tn' }, fP(r.viz.est))) : null,
       h('div', { class: 'kv' }, h('span', null, 'Correlação'), h('b', { class: 'tn' }, fR(r.r) + ci('r'))),
       r.rw != null ? h('div', { class: 'kv' }, h('span', null, `Dentro dos ${r.blocos}`), h('b', { class: 'tn' }, fR(r.rw) + ci('rw'))) : null,
       h('div', { class: 'kv' }, h('span', null, 'Afinidade'), h('b', { class: 'tn' }, fX(r.lift) + (r.ci?.lift ? ` (${fX(r.ci.lift[0])} a ${fX(r.ci.lift[1])})` : ''))),
-      r.lim ? h('div', { class: 'kv' }, h('span', null, 'Votos em comum (certo)'), h('b', { class: 'tn' }, `${fInt(r.lim.lo)} a ${fInt(r.lim.hi)}`)) : null,
-      h('div', { class: 'kv' }, h('span', null, 'Unidades de análise'), h('b', { class: 'tn' }, `${fInt(r.n)} ${r.unidade === 'local' ? 'locais' : 'seções'}`)),
-      h('p', null, 'O voto é secreto: ninguém sabe em quem cada eleitor votou. O que existe é o resultado de cada urna. Daí saem três leituras, da mais segura para a menos segura:'),
-      h('p', null, h('b', null, 'Teto certo. '), 'Em cada seção, quem votou nos dois não passa de min(X, Y) nem fica abaixo de X + Y − comparecimento. Vale sempre.'),
-      h('p', null, h('b', null, 'Correlação e afinidade. '), 'Medem se os votos caem nos mesmos lugares, por local de votação. A correlação "nos municípios" desconta a média de cada cidade e separa coincidência regional de eleitorado comum.'),
-      h('p', null, h('b', null, 'Estimativa. '), 'Regressão ecológica de Goodman presa, local a local, aos limites certos. Faixas por reamostragem de municípios (200 vezes).'),
-      h('p', null, 'Esquerda e direita: votos em Lula (PT) e em Flávio Bolsonaro (PL) para presidente na mesma seção.'),
+      h('div', { class: 'kv' }, h('span', null, 'Seções analisadas'), h('b', { class: 'tn' }, fInt(r.n))),
+      h('p', null, h('b', null, 'O que este site não sabe. '), 'Em quem cada pessoa votou: o voto é secreto. Também não sabe por que alguém votou: coincidência de votos não prova apoio, campanha conjunta nem transferência.'),
+      h('p', null, h('b', null, 'Certo. '), 'Em cada seção, quem votou nos dois não passa de min(X, Y) nem fica abaixo de X + Y − comparecimento. Somando as seções, sai a faixa certa. Vale sempre, sem hipótese.'),
+      h('p', null, h('b', null, 'Mapa. '), 'Correlação e afinidade medem se os votos caem nos mesmos lugares. "Dentro dos municípios" desconta a média de cada cidade e separa coincidência regional de eleitorado em comum.'),
+      h('p', null, h('b', null, 'Estimativa. '), 'Inferência ecológica com duas hipóteses extremas: vizinhança (o eleitor de X vota como os vizinhos de urna) e regressão de Goodman (todo o padrão entre urnas é preferência individual), as duas presas, urna a urna, aos limites certos. A manchete só afirma uma direção quando as duas concordam. Faixa da regressão por reamostragem de municípios.'),
       h('p', { class: 'muted' }, `Fonte: ${D.meta.fonte}. Zonas, bairros, locais e seções são áreas aproximadas em volta dos locais de votação.`))));
   clear(el).append(...frag);
 }
@@ -269,7 +241,7 @@ export function renderMain(el, level, id, ctx) {
 export function renderSide(el, level, id, ctx) {
   const tab = ctx.tab || 'trouxe';
   const tabs = h('div', { class: 'tabs', role: 'tablist' });
-  for (const [k, t] of [['trouxe', 'Quem trouxe'], ['junto', 'Anda junto'], ['onde', 'Onde'], ['pontos', 'Pontos']]) tabs.append(h('button', { type: 'button', role: 'tab', class: 'tab' + (k === tab ? ' on' : ''), 'aria-selected': String(k === tab), onclick: () => ctx.onTab(k) }, t));
+  for (const [k, t] of [['trouxe', 'Em comum'], ['junto', 'Anda junto'], ['onde', 'Onde'], ['pontos', 'Pontos']]) tabs.append(h('button', { type: 'button', role: 'tab', class: 'tab' + (k === tab ? ' on' : ''), 'aria-selected': String(k === tab), onclick: () => ctx.onTab(k) }, t));
   const b = h('div', { class: 'side-b' });
   if (tab === 'trouxe') trouxe(b, ctx);
   else if (tab === 'junto') junto(b, ctx);
@@ -278,33 +250,35 @@ export function renderSide(el, level, id, ctx) {
   clear(el).append(tabs, b);
 }
 
-/** Ranking: para Y, os candidatos de um cargo cujos eleitores mais votaram em Y (fração estimada e votos). */
+/** Ranking: para Y, os candidatos de um cargo cujos eleitores, estima-se, mais votaram em Y (faixa entre hipóteses). */
 function trouxe(b, ctx) {
   const cy = candOf(A.y), Y = curto(cy.nome);
   const cargos = [...D.cargos.keys()].filter((c) => c !== cy.cargo || c === 5);
-  b.append(h('div', { class: 'sec-t' }, h('b', null, `Quem trouxe votos para ${Y}`)));
+  b.append(h('div', { class: 'sec-t' }, h('b', null, `De quem mais saíram votos para ${Y}?`)));
   const chips = h('div', { class: 'chips' });
   for (const c of cargos) chips.append(h('button', { type: 'button', class: 'chip' + (c === ctx.trouxeCargo ? ' on' : ''), onclick: () => ctx.onTrouxeCargo(c) }, cargoCurto(c)));
   const ord = h('div', { class: 'chips' });
-  for (const [k, t] of [['est', '% dos eleitores'], ['votos', 'votos levados']]) ord.append(h('button', { type: 'button', class: 'chip' + (k === ctx.trouxeOrd ? ' on' : ''), onclick: () => ctx.onTrouxeOrd(k) }, t));
+  for (const [k, t] of [['est', '% dos eleitores'], ['votos', 'votos em comum']]) ord.append(h('button', { type: 'button', class: 'chip' + (k === ctx.trouxeOrd ? ' on' : ''), onclick: () => ctx.onTrouxeOrd(k) }, t));
   b.append(chips, ord);
   const res = ctx.trouxe();
   if (!res || res.loading) { b.append(h('div', { class: 'side-note' }, 'Calculando todos os candidatos…'), h('div', { class: 'skel', style: { height: '260px' } })); return; }
-  const lista = res.lista.slice().sort((p, q) => (ctx.trouxeOrd === 'votos' ? q.comum - p.comum : q.est - p.est)).slice(0, 25);
+  const meio = (l) => (l.est + l.viz) / 2;
+  const lista = res.lista.slice().sort((p, q) => (ctx.trouxeOrd === 'votos' ? meio(q) * q.tx - meio(p) * p.tx : meio(q) - meio(p))).slice(0, 25);
   if (!lista.length) { b.append(h('div', { class: 'side-note' }, 'Nenhum candidato com votos suficientes neste recorte.')); return; }
-  const max = Math.max(...lista.map((l) => (ctx.trouxeOrd === 'votos' ? l.comum : l.est)));
+  const max = Math.max(...lista.map((l) => (ctx.trouxeOrd === 'votos' ? Math.max(l.est, l.viz) * l.tx : Math.max(l.est, l.viz))));
+  const faixaTxt = (a, z) => (Math.abs(a - z) < 0.01 ? fP0(a) : `${fP0(Math.min(a, z))}–${fP0(Math.max(a, z))}`);
   lista.forEach((l, i) => {
     const c = candOf(l.key);
     if (!c) return;
-    const val = ctx.trouxeOrd === 'votos' ? l.comum : l.est;
+    const lo = Math.min(l.est, l.viz), hi = Math.max(l.est, l.viz), esc = ctx.trouxeOrd === 'votos' ? l.tx : 1;
     b.append(h('button', { type: 'button', class: 'row rk' + (l.key === A.x ? ' on' : ''), onclick: () => ctx.onX(l.key), title: `Ver ${c.nome} × ${cy.nome}` },
       h('span', { class: 'rk-i tn' }, String(i + 1)), avatar(c, 34),
       h('span', { class: 'row-n' }, h('b', null, c.nome), h('span', null, `${c.partido} ${c.n} · ${fInt(l.tx)} votos`)),
-      h('span', { class: 'row-v tn' }, h('b', null, ctx.trouxeOrd === 'votos' ? `~${fInt(l.comum)}` : `${fP0(l.est)}`),
-        h('span', { class: 'meter' }, h('i', { style: { width: `${Math.max(2, (val / max) * 100)}%`, background: 'var(--x)' } })),
-        h('span', null, ctx.trouxeOrd === 'votos' ? `${fP0(l.est)} deles` : `~${fInt(l.comum)} votos`))));
+      h('span', { class: 'row-v tn' }, h('b', null, ctx.trouxeOrd === 'votos' ? `~${fInt(meio(l) * l.tx)}` : faixaTxt(l.est, l.viz)),
+        h('span', { class: 'meter rng' }, h('i', { style: { marginLeft: `${(lo * esc / max) * 100}%`, width: `${Math.max(3, ((hi - lo) * esc / max) * 100)}%`, background: 'var(--x)' } })),
+        h('span', null, ctx.trouxeOrd === 'votos' ? faixaTxt(l.est, l.viz) : `~${fInt(meio(l) * l.tx)} votos`))));
   });
-  b.append(h('div', { class: 'side-note' }, `% estimada dos eleitores de cada candidato que também votou em ${Y}, por seção, presa aos limites certos de cada urna. Candidatos com menos de ${fInt(res.minimo)} votos no recorte ficam de fora (a conta vira ruído). Toque para comparar.`));
+  b.append(h('div', { class: 'side-note' }, `Estimativa: % dos eleitores de cada candidato que também votou em ${Y}, entre as duas hipóteses (vizinhança e regressão), urna por urna e presa aos limites certos. Mostra eleitorado em comum, não transferência nem apoio. Ficam de fora candidatos com menos de ${fInt(res.minimo)} votos no recorte.`));
 }
 
 function junto(b, ctx) {
@@ -424,7 +398,7 @@ export function renderMainBR(el, { onSearch, onCand, sugestoes }) {
   const frag = [
     h('div', { class: 'eyebrow' }, h('b', null, 'Eleições 2026'), h('span', null, '·'), h('span', null, '1º turno, 4 de outubro')),
     h('h1', { class: 'hero' }, 'Quem vota em ', h('em', null, 'quem'), '?'),
-    h('p', { class: 'lede' }, 'Escolha um candidato e descubra, urna por urna, em quem mais votaram os eleitores dele: para governador, senador, deputado ou presidente. Ou compare com a esquerda (Lula) e a direita (Bolsonaro).'),
+    h('p', { class: 'lede' }, 'Escolha dois candidatos e veja, urna por urna, o que se pode afirmar sobre os eleitores deles: o que é certo, o que o mapa mostra e o que se estima. Governador, senador, deputados ou presidente, em qualquer estado.'),
     h('button', { type: 'button', class: 'hero-search', onclick: onSearch }, ICON.busca(), 'Busque um candidato: nome, partido ou número'),
   ];
   const sug = h('div', { class: 'sug' }, h('div', { class: 'sec-t' }, h('b', null, 'Mais votados')));
@@ -440,13 +414,12 @@ export function renderMainBR(el, { onSearch, onCand, sugestoes }) {
 
 export function renderSideBR(el, onUF) {
   const ufs = [...BR.ufs.values()].sort((a, b) => a.n.localeCompare(b.n, 'pt-BR'));
-  const b = h('div', { class: 'side-b' }, h('div', { class: 'sec-t' }, h('b', null, 'Estados'), 'Lula × Bolsonaro'));
+  const b = h('div', { class: 'side-b' }, h('div', { class: 'sec-t' }, h('b', null, 'Estados'), 'eleitores que votaram'));
   for (const u of ufs) {
-    const t = u.esq + u.dir;
     b.append(h('button', { type: 'button', class: 'row uf-row', disabled: !u.ok || null, onclick: () => onUF(u.uf), title: u.ok ? `Abrir ${u.n}` : 'Dados ainda não processados' },
       h('span', { class: 'av', style: { width: '30px', height: '30px', '--pc': 'transparent' } }, h('b', { style: { fontSize: '11px', color: 'var(--ink-2)' } }, u.uf.toUpperCase())),
-      h('span', { class: 'row-n' }, h('b', null, u.n), h('span', null, u.ok ? `${fInt(u.cp)} votaram` : 'em processamento')),
-      t ? h('span', { class: 'row-v tn' }, h('span', null, `${fP0(u.esq / t)} · ${fP0(u.dir / t)}`), h('span', { class: 'split' }, h('i', { style: { width: `${(u.esq / t) * 70}px` } }), h('i'))) : h('span')));
+      h('span', { class: 'row-n' }, h('b', null, u.n)),
+      h('span', { class: 'row-v tn' }, h('b', null, u.ok ? fInt(u.cp) : '—'))));
   }
   clear(el).append(b);
 }

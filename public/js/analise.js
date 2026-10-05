@@ -113,31 +113,6 @@ export function rPorUnidade(level) {
   });
 }
 
-/**
- * Para que lado pende o eleitor de X: no lugar médio onde ele vota, quanto Lula (esquerda) e Bolsonaro (direita) fazem
- * do voto dos dois, contra o recorte inteiro. `E` e `Dr` = votos dos dois polos por seção.
- */
-export function lado(level, id, E, Dr) {
-  return memo(`ld:${level}:${id}`, () => {
-    const secs = secsOf(level, id), nL = D.un.local.ids.length;
-    const gx = new Float64Array(nL), ge = new Float64Array(nL), gd = new Float64Array(nL);
-    let te = 0, td = 0;
-    for (const s of secs) { const g = D.un.local.idx[s]; gx[g] += A.X[s]; ge[g] += E[s]; gd[g] += Dr[s]; te += E[s]; td += Dr[s]; }
-    let sx = 0, se = 0;
-    for (let g = 0; g < nL; g++) if (gx[g] > 0 && ge[g] + gd[g] > 0) { sx += gx[g]; se += gx[g] * (ge[g] / (ge[g] + gd[g])); }
-    const media = te + td > 0 ? te / (te + td) : null;
-    return { media, doX: sx > 0 ? se / sx : null, dif: sx > 0 && media != null ? se / sx - media : null };
-  });
-}
-
-/** Análise de X contra uma série qualquer (ex.: os polos Lula e Bolsonaro), no mesmo recorte, sem bootstrap. */
-export function cruzado(level, id, key, Ys) {
-  return memo(`cz:${key}:${level}:${id}`, () => {
-    const u = D.un.local;
-    return analisa({ secs: secsOf(level, id), grupo: u.idx, nG: u.ids.length, X: A.X, Y: Ys, DX: A.DX, DY: denomOf(key), exclusivos: exclusivos(A.x, key), B: 0 });
-  });
-}
-
 /** Ids das unidades de um nível que caem dentro do recorte (null = todas). */
 export function unidadesNoRecorte(level, sLevel, sId) {
   return memo(`nr:${level}:${sLevel}:${sId}`, () => {

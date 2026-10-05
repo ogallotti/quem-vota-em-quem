@@ -1,5 +1,5 @@
-// "Quem trouxe votos para Y": para cada candidato X de um cargo, a fração estimada dos eleitores de X que votaram em Y
-// e os votos que isso representa, no recorte. Mesma estatística do painel (Goodman por seção preso, urna a urna, aos
+// "Em comum": para cada candidato X de um cargo, a fração estimada dos eleitores de X que também votaram em Y, nas duas
+// hipóteses (regressão e vizinhança), e os votos que isso representa, no recorte. Eleitorado em comum, não transferência. Mesma estatística do painel (Goodman por seção preso, urna a urna, aos
 // limites certos), em tempo real: cada X percorre só as seções onde teve voto, então São Paulo inteiro sai em segundos.
 import { D, cargoOf, denomOf, loadCargo, secsOf } from './data.js';
 
@@ -47,17 +47,18 @@ function calcula(yKey, Y, cargo, series, secs) {
     const Sx = tx, det = W * Sxx - Sx * Sx;
     if (!(det > 0)) continue;
     const b = (W * Sxy - Sx * SY) / det, a = (SY - b * Sx) / W, beta = a + b;
-    let comum = 0;
+    let comum = 0, comumV = 0;
     for (let j = 0; j < sp.s.length; j++) {
       const s = sp.s[j];
       if (!no[s]) continue;
       const X = sp.v[j], N = Math.max(DXa[s], DYa[s]);
       const lo = Math.max(0, X + Y[s] - N) / X, hi = Math.min(X, Y[s]) / X;
       comum += Math.min(hi, Math.max(lo, beta)) * X;
+      comumV += Math.min(hi, Math.max(lo, y[s])) * X; // vizinhança: vota como os vizinhos da mesma urna
     }
     const vy = W * SYY - SY * SY;
     lista.push({
-      key, tx, comum, est: comum / tx, demais: TN - tx > 0 ? Math.max(0, (TY - comum) / (TN - tx)) : null,
+      key, tx, comum, est: comum / tx, viz: comumV / tx, demais: TN - tx > 0 ? Math.max(0, (TY - comum) / (TN - tx)) : null,
       r: vy > 0 ? (W * Sxy - Sx * SY) / Math.sqrt(det * vy) : null, lift: py > 0 ? Sxy / tx / py : null,
     });
   }

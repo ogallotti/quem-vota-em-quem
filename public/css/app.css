@@ -113,6 +113,27 @@ h1.hero em { font-style: italic; }
 .tag.none i { background: var(--muted); }
 .tag.warn i { background: var(--warn); }
 
+/* as três camadas da resposta: certo · mapa · estimativa */
+.camada { margin-top: 14px; padding: 12px 14px; border-radius: 12px; background: rgba(250, 250, 249, 0.03); border: 1px solid var(--line); }
+.camada p { margin: 0 0 6px; font-size: 13px; line-height: 1.5; color: var(--ink); }
+.camada p:last-child { margin-bottom: 0; }
+.camada b { font-weight: 600; }
+.camada .nota { font-size: 11.5px; color: var(--muted); }
+.camada .nota.warn { color: var(--warn); }
+.camada-t { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 7px; display: flex; align-items: center; gap: 6px; }
+.camada-t::before { content: ""; width: 7px; height: 7px; border-radius: 50%; }
+.c1 .camada-t::before { background: #8fd05a; }
+.c2 .camada-t::before { background: var(--x); }
+.c3 .camada-t::before { background: var(--warn); }
+.c1 { border-color: rgba(143, 208, 90, 0.25); }
+.est-r { margin-bottom: 10px; }
+.est-bar { position: relative; height: 10px; border-radius: 5px; background: var(--s3); overflow: hidden; }
+.est-bar span { position: absolute; top: 0; bottom: 0; border-radius: 5px; min-width: 3px; }
+.est-certo { background: rgba(106, 168, 245, 0.22); }
+.est-mod { background: var(--x); }
+.est-dem { background: #6b665e; }
+.aviso { display: flex; gap: 8px; align-items: flex-start; margin: 14px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--muted); }
+.aviso svg { flex: none; margin-top: 2px; }
 /* barras "dos eleitores de X / dos demais" */
 .bars { margin-top: 16px; display: grid; gap: 10px; }
 .bar-l { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 12.5px; color: var(--ink-2); margin-bottom: 5px; }
@@ -184,6 +205,7 @@ details.more[open] summary::after { content: "−"; }
 .more-btn:hover { color: var(--ink); }
 .uf-row .row-n b { font-weight: 500; }
 .row.rk { grid-template-columns: 16px auto minmax(0, 1fr) auto; }
+.meter.rng i { border-radius: 2px; }
 .rk-i { font-size: 11px; color: var(--muted); text-align: right; }
 .split { display: flex; width: 70px; height: 5px; border-radius: 3px; overflow: hidden; margin-top: 4px; }
 .split i:first-child { background: var(--esq); }
