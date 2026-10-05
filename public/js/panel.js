@@ -15,8 +15,9 @@ const fP = (x) => (x == null ? '—' : fPct(x * 100));
 const fP0 = (x) => (x == null ? '—' : x >= 0.095 ? `${Math.round(x * 100)}%` : `${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: x >= 0.0095 ? 1 : 2 }).format(x * 100)}%`);
 const fPP = (x) => `${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 }).format(Math.abs(x * 100))} pontos`;
 const nomeCand = (key) => candOf(key)?.nome || '';
-// 1.258.000 → "1,26 milhão"; 12.556 → "12,6 mil"; abaixo de mil, o número exato
-const fCompacto = (n) => (n >= 1e6 ? `${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 }).format(n / 1e6)} ${n >= 2e6 ? 'milhões' : 'milhão'}` : n >= 1e4 ? `${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: n >= 1e5 ? 0 : 1 }).format(n / 1e3)} mil` : fInt(n));
+// estimativas em números absolutos: 2 algarismos significativos, para não parecer contagem (5.318 → "5,3 mil")
+const sig2 = new Intl.NumberFormat('pt-BR', { maximumSignificantDigits: 2 });
+const fEstim = (n) => (n >= 1e6 ? `${sig2.format(n / 1e6)} ${n >= 2e6 ? 'milhões' : 'milhão'}` : n >= 1e3 ? `${sig2.format(n / 1e3)} mil` : sig2.format(n));
 const sp = (cls, txt) => h('span', { class: cls }, txt);
 
 /** Classe bivariada de uma unidade (proporções encolhidas) em relação às médias do recorte. */
@@ -173,11 +174,12 @@ export function renderMain(el, level, id, ctx) {
   // ---- 1. o que é certo (matemática das urnas, sem hipótese)
   const camada = (rot, cls, ...filhos) => h('section', { class: `camada ${cls}` }, h('div', { class: 'camada-t' }, rot), ...filhos);
   if (r.exclusivos) {
-    frag.push(camada('Certo, pelas urnas', 'c1', h('p', null, `${X} e ${Y} disputam a mesma vaga: cada eleitor vota em um só, então ninguém votou nos dois. A pergunta passa a ser se disputam os mesmos lugares.`)));
+    frag.push(camada('Certo, pelas urnas', 'c1', h('p', null, `${X} e ${Y} disputam a mesma vaga, e a urna aceita um voto só para ela: nenhum eleitor pode ter votado nos dois. A pergunta passa a ser se disputam os mesmos lugares.`)));
   } else if (r.lim && r.tx > 0) {
     frag.push(camada('Certo, pelas urnas', 'c1',
-      h('p', null, `Dos ${fInt(r.tx)} votos de ${X}, `, h('b', null, `entre ${fInt(r.lim.lo)} (${fP0(r.lim.loF)}) e ${fInt(r.lim.hi)} (${fP0(r.lim.hiF)})`), ` vieram de eleitores que também votaram em ${Y}.`),
-      h('p', { class: 'nota' }, r.lim.lo > 0 ? 'Não é estimativa: em cada urna, quem votou nos dois não passa do menor dos dois números nem fica abaixo da soma dos dois menos o comparecimento.' : 'Não é estimativa: em cada urna, quem votou nos dois não passa do menor dos dois números. O mínimo certo é zero.')));
+      h('p', null, `Pelos totais de cada urna, o número de eleitores que votaram em ${X} e também em ${Y} só pode estar `, h('b', null, `entre ${fInt(r.lim.lo)} e ${fInt(r.lim.hi)}`), ` (${fP0(r.lim.loF)} a ${fP0(r.lim.hiF)} dos ${fInt(r.tx)} votos de ${X}).`),
+      h('p', { class: 'nota' }, 'É um limite matemático, não uma contagem: o voto é secreto e ninguém sabe quem são essas pessoas. Em cada urna, os eleitores dos dois não podem passar do menor dos dois números de votos',
+        r.lim.lo > 0 ? ' nem ficar abaixo da soma dos dois menos o comparecimento' : ' (e o mínimo possível é zero)', '; somando as urnas, sai esta faixa.')));
   }
 
   // ---- 2. o que o mapa mostra (coincidência, não causa)
@@ -210,7 +212,7 @@ export function renderMain(el, level, id, ctx) {
         faixa(r.lim.loF, Math.min(r.lim.hiF, escala), 'est-certo', `limite certo: ${fP0(r.lim.loF)} a ${fP0(r.lim.hiF)}`),
         faixa(m.modelos[0], Math.max(m.modelos[1], m.modelos[0] + escala * 0.012), 'est-mod', `entre as duas hipóteses: ${fP0(m.modelos[0])} a ${fP0(m.modelos[1])}`)]),
       barraM(['Dos demais eleitores'], rotulo(m.demais[0], m.demais[1]), [faixa(m.demais[0], Math.max(m.demais[1], m.demais[0] + escala * 0.012), 'est-dem', 'demais eleitores')]),
-      h('p', null, `votaram em ${Y} (cerca de ${fCompacto(m.modelos[0] * r.tx)} a ${fCompacto(m.modelos[1] * r.tx)} eleitores de ${X}). As duas pontas vêm de hipóteses diferentes: o eleitor de ${X} vota como os vizinhos da mesma urna, ou todo o padrão entre urnas é preferência dele. A verdade costuma ficar entre elas; a faixa clara é o limite certo.`),
+      h('p', null, `votaram em ${Y}, estima-se. Em números absolutos, a faixa equivale a cerca de ${fEstim(m.modelos[0] * r.tx)} a ${fEstim(m.modelos[1] * r.tx)} ${m.modelos[1] * r.tx >= 1e6 ? 'de ' : ''}eleitores: é a proporção estimada vezes os votos de ${X}, uma ordem de grandeza, não uma contagem de pessoas. As duas pontas vêm de hipóteses diferentes: o eleitor de ${X} vota como os vizinhos da mesma urna, ou todo o padrão entre urnas é preferência dele. A verdade costuma ficar entre elas; a faixa clara é o limite certo.`),
       m.k === 'diverge' ? h('p', { class: 'nota warn' }, 'As duas hipóteses apontam em sentidos opostos: não dá para afirmar a direção.') : null,
       m.impreciso ? h('p', { class: 'nota warn' }, `A regressão é imprecisa aqui (faixa provável ${fP0(r.gd.lo)} a ${fP0(r.gd.hi)}): leia como ordem de grandeza.`) : null,
       escala < 1 ? h('p', { class: 'nota' }, `Barras ampliadas: o fim da barra é ${fP0(escala)}.`) : null));
@@ -219,7 +221,7 @@ export function renderMain(el, level, id, ctx) {
   if (!r.exclusivos) {
     const ds = ctx.distribuicao?.();
     const cargoNomeY = (D.cargos.get(cy.cargo)?.nome || '').toLowerCase();
-    const caixa = camada(`Como os eleitores de ${X} votaram para ${cargoNomeY}`, 'c3');
+    const caixa = camada(`Como os eleitores de ${X} se dividem para ${cargoNomeY} (estimativa)`, 'c3');
     if (!ds || ds.loading) caixa.append(h('div', { class: 'skel', style: { height: '120px' } }));
     else if (ds.length) {
       const fim = Math.max(...ds.map((d) => Math.max(d.modelos[1], d.demais[1])));
@@ -239,14 +241,14 @@ export function renderMain(el, level, id, ctx) {
     }
     frag.push(caixa);
   }
-  frag.push(h('p', { class: 'aviso' }, ICON.info(), h('span', null, 'O voto é secreto. Estes números vêm do resultado de cada urna, não de pessoas: limites certos, coincidências no mapa e estimativas. Coincidência não é causa nem transferência de votos.')));
+  frag.push(h('p', { class: 'aviso' }, ICON.info(), h('span', null, 'O voto é secreto: este site não sabe em quem cada pessoa votou. Tudo aqui sai do total de votos de cada urna: limites matemáticos, coincidências no mapa e estimativas estatísticas. Nenhum número é contagem de pessoas, e coincidência não é causa nem transferência de votos.')));
 
   const ci = (k) => (r.ci?.[k] ? ` (${fR(r.ci[k][0])} a ${fR(r.ci[k][1])})` : '');
   frag.push(h('details', { class: 'more' }, h('summary', null, 'Números completos e como ler'),
     h('div', { class: 'more-b' },
       h('div', { class: 'kv' }, h('span', null, `Votos de ${X}`), h('b', { class: 'tn' }, `${fInt(r.tx)} (${fP(r.px)})`)),
       h('div', { class: 'kv' }, h('span', null, `Votos de ${Y}`), h('b', { class: 'tn' }, `${fInt(r.ty)} (${fP(r.py)})`)),
-      r.lim ? h('div', { class: 'kv' }, h('span', null, 'Votos em comum (certo)'), h('b', { class: 'tn' }, `${fInt(r.lim.lo)} a ${fInt(r.lim.hi)}`)) : null,
+      r.lim ? h('div', { class: 'kv' }, h('span', null, 'Eleitores dos dois (limite certo)'), h('b', { class: 'tn' }, `${fInt(r.lim.lo)} a ${fInt(r.lim.hi)}`)) : null,
       r.gd ? h('div', { class: 'kv' }, h('span', null, 'Regressão (Goodman)'), h('b', { class: 'tn' }, `${fP(r.gd.est)}${r.gd.lo != null ? ` (${fP0(r.gd.lo)} a ${fP0(r.gd.hi)})` : ''}`)) : null,
       r.viz ? h('div', { class: 'kv' }, h('span', null, 'Vizinhança'), h('b', { class: 'tn' }, fP(r.viz.est))) : null,
       h('div', { class: 'kv' }, h('span', null, 'Correlação'), h('b', { class: 'tn' }, fR(r.r) + ci('r'))),
@@ -254,7 +256,7 @@ export function renderMain(el, level, id, ctx) {
       h('div', { class: 'kv' }, h('span', null, 'Afinidade'), h('b', { class: 'tn' }, fX(r.lift) + (r.ci?.lift ? ` (${fX(r.ci.lift[0])} a ${fX(r.ci.lift[1])})` : ''))),
       h('div', { class: 'kv' }, h('span', null, 'Seções analisadas'), h('b', { class: 'tn' }, fInt(r.n))),
       h('p', null, h('b', null, 'O que este site não sabe. '), 'Em quem cada pessoa votou: o voto é secreto. Também não sabe por que alguém votou: coincidência de votos não prova apoio, campanha conjunta nem transferência.'),
-      h('p', null, h('b', null, 'Certo. '), 'Em cada seção, quem votou nos dois não passa de min(X, Y) nem fica abaixo de X + Y − comparecimento. Somando as seções, sai a faixa certa. Vale sempre, sem hipótese.'),
+      h('p', null, h('b', null, 'Certo. '), 'Em cada seção, os eleitores dos dois não passam de min(X, Y) nem ficam abaixo de X + Y − comparecimento. Somando as seções, sai a faixa certa. Vale sempre, sem hipótese, mas é um limite, não uma contagem.'),
       h('p', null, h('b', null, 'Mapa. '), 'Correlação e afinidade medem se os votos caem nos mesmos lugares. "Dentro dos municípios" desconta a média de cada cidade e separa coincidência regional de eleitorado em comum.'),
       h('p', null, h('b', null, 'Estimativa. '), 'Inferência ecológica com duas hipóteses extremas: vizinhança (o eleitor de X vota como os vizinhos de urna) e regressão de Goodman (todo o padrão entre urnas é preferência individual), as duas presas, urna a urna, aos limites certos. A manchete só afirma uma direção quando as duas concordam. Faixa da regressão por reamostragem de municípios.'),
       h('p', { class: 'muted' }, `Fonte: ${D.meta.fonte}. Zonas, bairros, locais e seções são áreas aproximadas em volta dos locais de votação.`))));
@@ -284,7 +286,7 @@ function emComum(b, ctx) {
   for (const [k, t] of [['de', ['Eleitores de ', sp('x', X)]], ['para', ['Votos de ', sp('y', Y)]]])
     seg.append(h('button', { type: 'button', class: k === ctx.sentido ? 'on' : '', onclick: () => ctx.onSentido(k) }, ...t));
   b.append(seg);
-  b.append(h('div', { class: 'sec-t' }, h('b', null, de ? `Os eleitores de ${X} votaram em quem?` : `Os eleitores de quem votaram em ${Y}?`)));
+  b.append(h('div', { class: 'sec-t' }, h('b', null, de ? `Os eleitores de ${X} votaram em quem?` : `Os eleitores de quem votaram em ${Y}?`), 'estimativa'));
   const cargoFixo = de ? cx.cargo : cy.cargo;
   const chips = h('div', { class: 'chips' });
   for (const c of D.cargos.keys()) if (c !== cargoFixo || c === 5) chips.append(h('button', { type: 'button', class: 'chip' + (c === ctx.comumCargo ? ' on' : ''), onclick: () => ctx.onComumCargo(c) }, cargoCurto(c)));
@@ -293,10 +295,10 @@ function emComum(b, ctx) {
   const porN = !de && ctx.ordem === 'n';
   if (!de) {
     const ord = h('div', { class: 'seg' });
-    for (const [k, t] of [['pct', 'Proporção'], ['n', 'Número de eleitores']]) ord.append(h('button', { type: 'button', class: k === ctx.ordem ? 'on' : '', onclick: () => ctx.onOrdem(k) }, t));
+    for (const [k, t] of [['pct', 'Proporção'], ['n', 'Volume estimado']]) ord.append(h('button', { type: 'button', class: k === ctx.ordem ? 'on' : '', onclick: () => ctx.onOrdem(k) }, t));
     b.append(ord, h('p', { class: 'side-note ord-nota' }, porN
-      ? `Quantas pessoas votaram nos dois: a proporção vezes os votos do candidato. Favorece quem teve muitos votos.`
-      : `Que parte dos eleitores de cada candidato também votou em ${Y}. Favorece eleitorados fiéis, mesmo pequenos.`));
+      ? `A proporção estimada vezes os votos de cada candidato: dá a escala, em eleitores, não uma contagem de quem votou nos dois (o voto é secreto). Favorece candidatos com muitos votos.`
+      : `Que parte dos eleitores de cada candidato, estima-se, também votou em ${Y}. Favorece eleitorados fiéis, mesmo pequenos.`));
   }
   const res = ctx.comum();
   if (!res || res.loading) { b.append(h('div', { class: 'side-note' }, 'Calculando todos os candidatos…'), h('div', { class: 'skel', style: { height: '260px' } })); return; }
@@ -310,7 +312,7 @@ function emComum(b, ctx) {
   if (!lista.length) { b.append(h('div', { class: 'side-note' }, 'Nenhum candidato com votos suficientes neste recorte.')); return; }
   const max = Math.max(...lista.map((l) => (porN ? l.hi * l.base : Math.max(l.hi, l.dem ? Math.max(...l.dem) : 0)))) || 1;
   const faixaTxt = (l) => (l.hi - l.lo < 0.01 ? `~${fP0(meio(l))}` : `${fP0(l.lo)}–${fP0(l.hi)}`);
-  const pessoas = (l) => `~${fCompacto(meio(l) * l.base)} eleitores`;
+  const pessoas = (l) => `≈ ${fEstim(meio(l) * l.base)} (estim.)`;
   lista.forEach((l, i) => {
     const c = candOf(l.key);
     if (!c) return;
@@ -322,12 +324,12 @@ function emComum(b, ctx) {
       h('span', { class: 'row-v tn' }, h('b', { class: !porN && l.hi - l.lo > 0.35 ? 'larga' : null, title: l.hi - l.lo > 0.35 ? 'Faixa larga: os dados não separam bem as duas hipóteses' : null }, porN ? pessoas(l) : faixaTxt(l)),
         h('span', { class: 'meter rng' }, h('i', { style: { marginLeft: pc(l.lo), width: `max(3px, calc(${pc(l.hi)} - ${pc(l.lo)}))`, background: 'var(--x)' } }),
           !porN && l.dem ? h('b', { class: 'tick', style: { left: pc((l.dem[0] + l.dem[1]) / 2) } }) : null),
-        h('span', null, porN ? faixaTxt(l) : pessoas(l)))));
+        h('span', { title: porN ? null : 'Proporção estimada vezes os votos: escala, não contagem de pessoas' }, porN ? faixaTxt(l) : pessoas(l)))));
   });
   const fragil = de && res.tx < res.minimo ? ` ${X} tem poucos votos neste recorte (${fInt(res.tx)}): leitura frágil.` : '';
   b.append(h('div', { class: 'side-note' }, de
-    ? `Estimativa: que parte dos eleitores de ${X} votou em cada candidato, entre as duas hipóteses (vizinhança e regressão), presa urna a urna aos limites certos. O traço cinza é a taxa entre os demais eleitores. Faixa larga = pouca informação. Eleitorado em comum, não transferência nem apoio.${fragil}`
-    : `Estimativa: que parte dos eleitores de cada candidato também votou em ${Y}, entre as duas hipóteses (vizinhança e regressão), presa urna a urna aos limites certos.${porN ? '' : ' Ordenados pelo piso da faixa; o traço cinza é a taxa entre os demais eleitores.'} Faixa larga = pouca informação. Eleitorado em comum, não transferência nem apoio. Ficam de fora candidatos com menos de ${fInt(res.minimo)} votos no recorte.`));
+    ? `Estimativa: que parte dos eleitores de ${X} votou em cada candidato, entre as duas hipóteses (vizinhança e regressão), presa urna a urna aos limites certos. O traço cinza é a taxa entre os demais eleitores. Faixa larga = pouca informação. Eleitorado em comum estimado: não é contagem de pessoas, transferência nem apoio.${fragil}`
+    : `Estimativa: que parte dos eleitores de cada candidato também votou em ${Y}, entre as duas hipóteses (vizinhança e regressão), presa urna a urna aos limites certos.${porN ? '' : ' Ordenados pelo piso da faixa; o traço cinza é a taxa entre os demais eleitores.'} Faixa larga = pouca informação. Eleitorado em comum estimado: não é contagem de pessoas, transferência nem apoio. Ficam de fora candidatos com menos de ${fInt(res.minimo)} votos no recorte.`));
 }
 
 function onde(b, level, id, ctx) {
