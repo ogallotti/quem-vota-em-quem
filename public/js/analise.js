@@ -1,6 +1,6 @@
 // Liga dados e estatística: o par (X, Y) escolhido, valores por unidade em cada nível e a análise de cada recorte.
 import { D, cargoOf, denomOf, getProps, secsOf } from './data.js';
-import { analisa, pearson } from './stats.js';
+import { analisa, encolhe, pearson, terco } from './stats.js';
 
 export const A = { x: null, y: null, X: null, Y: null, DX: null, DY: null, ver: 0, cache: new Map() };
 
@@ -31,14 +31,28 @@ export function porUnidade(level) {
   });
 }
 
-/** Votos e participação de X e Y numa unidade. */
+/**
+ * Votos e participação de X e Y numa unidade. px/py = proporção observada; ex/ey = encolhida em direção à média do
+ * estado (para colorir o mapa: uma seção de 50 eleitores não vira extremo por acaso).
+ */
 export function valorDe(level, id) {
   if (!A.X) return null;
-  if (level === 'estado') { const r = recorte('estado', 0); return { x: r.tx, y: r.ty, dx: r.tdx, dy: r.tdy, px: r.px, py: r.py }; }
+  const e = estado();
+  if (level === 'estado') return { x: e.x, y: e.y, dx: e.dx, dy: e.dy, px: e.px, py: e.py, ex: e.px, ey: e.py };
   const u = D.un[level], g = u?.pos.get(id);
   if (g == null) return null;
   const v = porUnidade(level);
-  return { x: v.x[g], y: v.y[g], dx: v.dx[g], dy: v.dy[g], px: v.dx[g] > 0 ? v.x[g] / v.dx[g] : 0, py: v.dy[g] > 0 ? v.y[g] / v.dy[g] : 0 };
+  const x = v.x[g], y = v.y[g], dx = v.dx[g], dy = v.dy[g];
+  return { x, y, dx, dy, px: dx > 0 ? x / dx : 0, py: dy > 0 ? y / dy : 0, ex: encolhe(x, dx, e.px), ey: encolhe(y, dy, e.py) };
+}
+
+/** Totais do estado (sem bootstrap: barato). */
+function estado() {
+  return memo('est', () => {
+    let x = 0, y = 0, dx = 0, dy = 0;
+    for (let s = 0; s < D.n; s++) { x += A.X[s]; y += A.Y[s]; dx += A.DX[s]; dy += A.DY[s]; }
+    return { x, y, dx, dy, px: dx > 0 ? x / dx : 0, py: dy > 0 ? y / dy : 0 };
+  });
 }
 
 const MIN_LOCAIS = 12;
@@ -46,19 +60,29 @@ const MIN_LOCAIS = 12;
 function grupoDe(level, id) {
   if (level === 'local' || level === 'secao') return 'secao';
   if (level === 'estado') return 'local';
-  const secs = secsOf(level, id), set = new Set();
-  for (const s of secs) set.add(D.sec.li[s]);
+  const set = new Set();
+  for (const s of secsOf(level, id)) set.add(D.sec.li[s]);
   return set.size >= MIN_LOCAIS ? 'local' : 'secao';
 }
 
-/** Análise completa de um recorte (seleção). */
-export function recorte(level, id) {
+/** Bloco de cada unidade (correlação dentro dos blocos e bootstrap): local → município; seção → local. */
+function blocosDe(unidade) {
+  const u = D.un[unidade];
+  return Int32Array.from(u.ids, (id) => (unidade === 'local' ? D.loc.mi[id] : D.sec.li[id]));
+}
+
+/** Análise completa de um recorte (seleção), com intervalos por bootstrap. */
+export function recorte(level, id, { B = 200 } = {}) {
   if (!A.X) return null;
-  return memo(`r:${level}:${id}`, () => {
+  return memo(`r:${level}:${id}:${B}`, () => {
     const unidade = grupoDe(level, id);
     const u = D.un[unidade];
-    const out = analisa({ secs: secsOf(level, id), grupo: u.idx, nG: u.ids.length, X: A.X, Y: A.Y, DX: A.DX, DY: A.DY, exclusivos: exclusivos() });
+    const out = analisa({
+      secs: secsOf(level, id), grupo: u.idx, nG: u.ids.length, cluster: memo(`bl:${unidade}`, () => blocosDe(unidade)),
+      X: A.X, Y: A.Y, DX: A.DX, DY: A.DY, exclusivos: exclusivos(), B,
+    });
     out.unidade = unidade;
+    out.blocos = unidade === 'local' ? 'municípios' : 'locais';
     out.ids = out.gi.map((g) => u.ids[g]);
     return out;
   });
@@ -109,22 +133,43 @@ export function lado(level, id, E, Dr) {
   });
 }
 
-export const nomeRecorte = (level, id) => (level === 'estado' ? D.meta.uf_nome : getProps(level, id)?.n || '');
-
-/** Análise de X contra uma série qualquer (ex.: os polos Lula e Bolsonaro), no mesmo recorte. */
+/** Análise de X contra uma série qualquer (ex.: os polos Lula e Bolsonaro), no mesmo recorte, sem bootstrap. */
 export function cruzado(level, id, key, Ys) {
   return memo(`cz:${key}:${level}:${id}`, () => {
     const u = D.un.local;
-    return analisa({ secs: secsOf(level, id), grupo: u.idx, nG: u.ids.length, X: A.X, Y: Ys, DX: A.DX, DY: denomOf(key), exclusivos: exclusivos(A.x, key) });
+    return analisa({ secs: secsOf(level, id), grupo: u.idx, nG: u.ids.length, X: A.X, Y: Ys, DX: A.DX, DY: denomOf(key), exclusivos: exclusivos(A.x, key), B: 0 });
   });
 }
 
-/** Ids das unidades de um nível que caem dentro do recorte. */
+/** Ids das unidades de um nível que caem dentro do recorte (null = todas). */
 export function unidadesNoRecorte(level, sLevel, sId) {
   return memo(`nr:${level}:${sLevel}:${sId}`, () => {
-    if (sLevel === 'estado') return null; // todas
+    if (sLevel === 'estado') return null;
     const u = D.un[level], set = new Set();
     for (const s of secsOf(sLevel, sId)) if (u.idx[s] >= 0) set.add(u.ids[u.idx[s]]);
     return set;
+  });
+}
+
+export const nomeRecorte = (level, id) => (level === 'estado' ? D.meta.uf_nome : getProps(level, id)?.n || '');
+
+/**
+ * Território de X no recorte: locais de votação onde X é forte (acima de 1,25× a média do recorte, proporção encolhida). Quanto
+ * dos eleitores ele reúne e quanto dos votos de X e de Y saiu dali. Se o território de X dá a Y bem mais do que o seu
+ * peso no eleitorado, Y depende dele; se dá o mesmo, não.
+ */
+export function territorio(level, id) {
+  return memo(`tt:${level}:${id}`, () => {
+    const r = recorte(level, id);
+    const u = D.un.local, nL = u.ids.length, secs = secsOf(level, id);
+    const gx = new Float64Array(nL), gy = new Float64Array(nL), gd = new Float64Array(nL), gdy = new Float64Array(nL);
+    for (const s of secs) { const g = u.idx[s]; gx[g] += A.X[s]; gy[g] += A.Y[s]; gd[g] += A.DX[s]; gdy[g] += A.DY[s]; }
+    let el = 0, elT = 0, vx = 0, vxT = 0, vy = 0, vyT = 0, n = 0;
+    for (let g = 0; g < nL; g++) {
+      if (!(gd[g] > 0)) continue;
+      el += gd[g]; vx += gx[g]; vy += gy[g];
+      if (gx[g] > 0 && terco(encolhe(gx[g], gd[g], r.px), r.px) === 2) { elT += gd[g]; vxT += gx[g]; vyT += gy[g]; n++; }
+    }
+    return { n, eleitores: el > 0 ? elT / el : 0, votosX: vx > 0 ? vxT / vx : 0, votosY: vy > 0 ? vyT / vy : 0 };
   });
 }

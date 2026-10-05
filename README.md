@@ -39,20 +39,40 @@ python3 -m http.server 4190 --directory public --bind 127.0.0.1   # ou: pnpm ser
 ## Dados
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install shapely pandas numpy scipy
-.venv/bin/python scripts/coleta_bu.py --uf ma     # boletins de urna de todas as seções (cache em .cache/ma/bu)
-.venv/bin/python scripts/build_data.py --uf ma    # gera public/data/ma/
+python3 -m venv .venv && .venv/bin/pip install shapely pandas numpy scipy pillow brotli
+gh workflow run coleta.yml                        # boletins de urna do Brasil em ~64 fatias paralelas (GitHub Actions, ~30 min)
+gh run download <id> -D /tmp/bu                   # artefatos bu-<uf>-<k>de<n>: copie o conteúdo de cada um para .cache/<uf>/
+.venv/bin/python scripts/fotos.py                 # resultado oficial de cada cargo e UF + fotos dos candidatos (.cache/)
+.venv/bin/python scripts/build_data.py --uf ma    # uma UF → public/data/ma/ e public/fotos/ma/
+.venv/bin/python scripts/build_br.py              # nacional: public/data/br.json, br-mun.json, cands.json, fotos de presidente
 ```
 
-1. `coleta_bu.py` baixa o boletim de urna (BU) de cada seção na área de divulgação do TSE e lê os votos de **todos os cargos** direto do binário (BER/ASN.1, lido por posição porque a especificação de 2022 não decodifica o formato de 2026). Seções agregadas não têm BU próprio (404): os votos delas estão na seção principal. O TSE limita pedidos por IP (HTTP 429): para UFs grandes, rode numa máquina com boa rede e traga `.cache/<uf>/`.
-2. `build_data.py` confere **cada candidato** contra a divulgação oficial do TSE (aborta se a soma dos boletins divergir), monta a geografia (malhas do IBGE, cadastro de locais de votação do TSE, áreas de Voronoi para zonas, bairros, locais e seções) e grava uma série de votos por candidato (`v/<cargo>/<número>.json`, esparsa) e as afinidades pré-calculadas.
+1. `coleta_bu.py` baixa o boletim de urna (BU) de cada seção na área de divulgação do TSE e lê os votos de **todos os cargos** direto do binário (BER/ASN.1, lido por posição porque a especificação de 2022 não decodifica o formato de 2026). Seção sem BU de urna usa o boletim do Sistema de Apuração (`busa`, mesmo formato). Seções agregadas não têm BU próprio (404): os votos delas estão na seção principal. O TSE limita pedidos por IP (HTTP 429), por isso a coleta nacional roda no GitHub Actions (`.github/workflows/coleta.yml`): cada fatia numa máquina com IP próprio, decodificando em memória e guardando só o resumo (~1,2 KB por seção em vez de ~14 KB do BU bruto).
+2. `build_data.py` confere **cada candidato** contra a divulgação oficial do TSE (aborta se a soma dos boletins divergir), monta a geografia (malhas do IBGE, cadastro de locais de votação do TSE, áreas de Voronoi para zonas, bairros, locais e seções) e grava o formato leve descrito abaixo. Seções que o TSE totalizou mas cujo boletim não foi publicado (1.025 no estado de São Paulo, quase todas na capital; 56 em MG; 15 em Lauro de Freitas, BA; 1 em Porto Alegre) são **reconstruídas** pelo resíduo entre o resultado oficial da zona e a soma dos boletins da zona, repartido na proporção dos eleitores; ficam marcadas em `sec.est`.
+
+### Formato (v2, para servir milhões de acessos de graça em hospedagem estática)
+
+Geometria quantizada (`qgeom`): lista de polígonos → anéis → inteiros `[x0, y0, dx1, dy1, ...]` na escala `q` (o primeiro par absoluto, os demais diferenças). O Cloudflare comprime JSON com brotli.
+
+| Arquivo | Quando | Conteúdo |
+|-|-|-|
+| `data/br.json` | abertura | UFs (geometria leve, Lula × Bolsonaro, comparecimento) e os polos |
+| `data/br-mun.json` | mapa do Brasil por município | todos os municípios com Lula × Bolsonaro |
+| `data/cands.json` | busca nacional | todos os candidatos (presidente uma vez, uf `br`) |
+| `data/<uf>/base.json` | ao abrir a UF | candidatos por cargo, municípios e regiões, locais e seções em colunas (os totais por área são somados no navegador) |
+| `data/<uf>/zb.json` | sob demanda | zonas e bairros |
+| `data/<uf>/nomes.json` | sob demanda | nome, endereço e bairro de cada local |
+| `data/<uf>/m/<ibge>.json` | ao aproximar | polígonos de locais e seções do município |
+| `data/<uf>/v/<cargo>-<k>.json` | ao escolher candidato | votos por seção, esparsos, em pacotes de ~120 KB |
+| `data/<uf>/af.json` | painel | quem mais (e menos) anda junto com cada candidato |
+| `fotos/<uf>/<cargo>-<k>.webp` | listas | sprites 8×8 de fotos 64×64, por votos (presidente em `fotos/br/`) |
 
 | Fonte | Uso |
 |-|-|
 | Boletins de urna (TSE, divulgação) | votos de cada candidato em cada seção, comparecimento, aptos |
-| Resultado oficial por cargo (TSE) | nome, partido, situação e conferência dos totais |
+| Resultado oficial por cargo, UF e zona (TSE) | nome, nome completo, partido, situação, foto; conferência dos totais; seções sem boletim |
 | Cadastro de locais de votação 2026 (TSE) | nome, endereço, bairro e coordenadas dos locais |
-| Malhas e localidades (IBGE) | municípios e regiões |
+| Malhas e localidades (IBGE) | estados, municípios e regiões |
 
 ## Teste
 

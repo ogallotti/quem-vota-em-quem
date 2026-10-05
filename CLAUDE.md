@@ -8,13 +8,16 @@
 
 **Comandos**
 - Dev: `python3 -m http.server 4190 --directory public --bind 127.0.0.1` (neste ambiente, via Portly: `portly temp '...' --path <repo>`).
-- Dados: `.venv/bin/python scripts/coleta_bu.py --uf ma` (BUs, cache em `.cache/ma/bu`) → `.venv/bin/python scripts/build_data.py --uf ma` (saída em `public/data/ma/`, confere cada candidato com a divulgação oficial e aborta se divergir).
+- Dados: coleta nacional no GitHub Actions (`gh workflow run coleta.yml`, artefatos → `.cache/<uf>/`), `scripts/fotos.py` (resultados oficiais e fotos), `scripts/build_data.py --uf <uf>` (formato v2 em `public/data/<uf>/` e sprites em `public/fotos/<uf>/`; confere cada candidato com a divulgação oficial e aborta se divergir) e `scripts/build_br.py` (arquivos nacionais). Funções comuns em `scripts/comum.py`. Formato descrito no README.
 - Teste: `pnpm test` (estatística, node --test), `pnpm smoke` e `pnpm test:mobile` (Playwright, Chromium real; precisam do servidor de pé em 4190).
 
 **Gotchas**
 - BU de 2026: a especificação ASN.1 de 2022 não decodifica (campos INTEGER a mais); `coleta_bu.py` lê o BER por posição/etiqueta. Um BU traz as duas eleições: federal 6257 (cargo 1) e estadual 6259 (cargos 3, 5, 6, 7; 8 no DF). Seções agregadas dão 404 no `aux.json` (votos na principal); a lista fica em `.cache/<uf>/sem_bu.txt` para não repetir pedidos. O TSE responde 429 por IP sob carga.
 - O BU identifica o local pelo número **original**: no cadastro de 2026 a chave é `NR_LOCAL_VOTACAO_ORIGINAL` (nome e coordenadas são do local onde a seção votou). O zip do cadastro traz um CSV por UF (`_MA.csv`) e um `_BRASIL.csv`; 2026 usa vírgula decimal nas coordenadas, 2022 usa ponto.
-- Comparecimento de presidente ≠ estadual em algumas seções (voto em trânsito só para presidente): `secoes.json` tem `cp` (estadual) e `cpf` (federal); `denomOf()` escolhe pelo cargo.
+- Comparecimento de presidente ≠ estadual em algumas seções (voto em trânsito só para presidente): `base.json` traz `sec.cp` (estadual) e `sec.tf` (federal − estadual).
+- Seções totalizadas sem boletim publicado (404 no `aux.json` sem ser agregada no cadastro): reconstruídas pelo resíduo do resultado oficial da **zona** (`<uf><mun>-z<zona>-c<cargo>-e<eleição>-u.json`), repartido por eleitores; índices em `sec.est`. Boletim do Sistema de Apuração (`busa`) pode trazer local 1: vale o local que o cadastro atribui à seção.
+- Municípios TSE × IBGE: pareamento por nome, depois por semelhança (logado) e `APELIDOS` em `comum.py` (ex.: Boa Saúde = Januário Cicco). Município sem malha no IBGE (Boa Esperança do Norte, MT, criado em 2024): área = contorno dos locais + ~3 km.
+- Limites do Cloudflare Pages: 20.000 arquivos por deploy e 25 MiB por arquivo, sem Range: por isso os pacotes de votos, os polígonos por município e as fotos em sprites.
 - Candidatos com votos anulados (sub judice) entram com `valido = 0`; números que aparecem no BU sem registro oficial viram "Candidato N".
 - Mesma vaga = voto exclusivo (`exclusivos()` em `analise.js`): sem teto nem estimativa, a pergunta vira "disputam o mesmo território". **Senador tem dois votos em 2026**: dois senadores NÃO são exclusivos.
 - Estatística (`js/stats.js`, funções puras e testadas): correlação e regressão por **local de votação** (seções do mesmo local são quase sorteio: ruído puro); em recortes com menos de 12 locais, por seção. Teto/piso (Duncan–Davis) sempre por seção. A estimativa de Goodman é limitada ao intervalo certo. O veredito (`leitura()`) combina correlação e afinidade: em candidatos de voto concentrado a correlação fica baixa mesmo com territórios claramente sobrepostos ou separados.

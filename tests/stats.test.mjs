@@ -1,7 +1,7 @@
 // Testes do núcleo estatístico com dados sintéticos de verdade conhecida.  node --test tests/
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { analisa, forca, goodman, leitura, pearson, terco } from '../public/js/stats.js';
+import { analisa, encolhe, forca, goodman, leitura, pearson, terco } from '../public/js/stats.js';
 
 // gerador determinístico (mulberry32)
 function rng(seed) {
@@ -77,4 +77,67 @@ test('leitura combina correlação e afinidade', () => {
   assert.deepEqual(leitura(0.15, 2.4), { k: 'pos', nivel: 3 });
   assert.equal(leitura(0.3, 0.6).k, 'mix');
   assert.deepEqual(leitura(null, null), { k: 'zero', nivel: 0 });
+});
+
+/** Municípios onde X e Y são fortes JUNTOS (efeito regional), mas dentro de cada município o voto em um não muda o outro. */
+function regional(nMun = 60, porMun = 25, seed = 5) {
+  const r = rng(seed);
+  const X = [], Y = [], D = [], grupo = [], cl = [];
+  let g = 0;
+  for (let m = 0; m < nMun; m++) {
+    const forca = r(); // a mesma "força regional" puxa os dois
+    for (let k = 0; k < porMun; k++, g++) {
+      const N = 300;
+      const px = 0.02 + 0.2 * forca, py = 0.05 + 0.3 * forca; // dentro do município: independentes, só ruído binomial
+      let x = 0, y = 0;
+      for (let i = 0; i < N; i++) { x += r() < px; y += r() < py; }
+      X.push(x); Y.push(y); D.push(N); grupo.push(g); cl.push(m);
+    }
+  }
+  return { X: Float64Array.from(X), Y: Float64Array.from(Y), D: Float64Array.from(D), grupo: Int32Array.from(grupo), cl: Int32Array.from(cl), secs: Int32Array.from(grupo) };
+}
+
+test('coincidência só regional: r alto, mas a correlação dentro dos municípios fica perto de zero', () => {
+  const { X, Y, D, grupo, cl, secs } = regional();
+  const a = analisa({ secs, grupo, nG: secs.length, cluster: cl, X, Y, DX: D, DY: D });
+  assert.ok(a.r > 0.6, `r ${a.r}`);
+  assert.ok(Math.abs(a.rw) < 0.12, `rw ${a.rw}`);
+  assert.ok(a.ci.rw[0] < 0 && a.ci.rw[1] > 0, `ic rw ${a.ci.rw}`);
+});
+
+test('dobradinha de verdade: correlação alta também dentro dos municípios', () => {
+  const { X, Y, D, grupo, secs } = simula(3000, 0.7, 0.1, 9);
+  const cl = Int32Array.from(grupo, (g) => g % 50);
+  const a = analisa({ secs, grupo, nG: secs.length, cluster: cl, X, Y, DX: D, DY: D });
+  assert.ok(a.rw > 0.3, `rw ${a.rw}`);
+});
+
+test('estimativa limitada local a local: sempre dentro dos limites certos e perto da verdade', () => {
+  const { X, Y, D, grupo, secs } = simula(2000, 0.45, 0.15, 13);
+  const a = analisa({ secs, grupo, nG: secs.length, X, Y, DX: D, DY: D });
+  assert.ok(a.gd.est >= a.lim.loF - 1e-9 && a.gd.est <= a.lim.hiF + 1e-9);
+  assert.ok(Math.abs(a.gd.est - 0.45) < 0.03, `est ${a.gd.est}`);
+  assert.ok(a.gd.lo <= 0.45 && a.gd.hi >= 0.45, `ic ${a.gd.lo}–${a.gd.hi}`);
+  // a conta fecha: votos de Y = comuns + vindos dos demais
+  const comum = a.gd.est * a.tx, demais = a.gd.demais * (a.tdx - a.tx);
+  assert.ok(Math.abs(comum + demais - a.ty) / a.ty < 0.01, `${comum + demais} × ${a.ty}`);
+});
+
+test('bootstrap determinístico: o mesmo recorte dá os mesmos intervalos', () => {
+  const { X, Y, D, grupo, secs } = simula(500, 0.5, 0.2, 21);
+  const a = analisa({ secs, grupo, nG: secs.length, X, Y, DX: D, DY: D });
+  const b = analisa({ secs, grupo, nG: secs.length, X, Y, DX: D, DY: D });
+  assert.deepEqual(a.ci, b.ci);
+  assert.ok(a.ci.r[0] < a.r && a.r < a.ci.r[1]);
+});
+
+test('sinal fraco que o acaso explica vira "inconclusivo"', () => {
+  assert.equal(leitura(0.12, 1.05, { r: [-0.02, 0.25], lift: [0.97, 1.12] }).k, 'inc');
+  assert.equal(leitura(0.12, 1.05, { r: [0.05, 0.2], lift: [1.01, 1.1] }).k, 'pos');
+});
+
+test('encolhimento: unidade pequena puxada para a média, grande quase intacta', () => {
+  const media = 0.1;
+  assert.ok(Math.abs(encolhe(10, 50, media) - 0.1556) < 0.001); // 20% em 50 eleitores vira ~15,6%
+  assert.ok(Math.abs(encolhe(200, 1000, media) - 0.1962) < 0.001); // 20% em 1.000 fica ~19,6%
 });

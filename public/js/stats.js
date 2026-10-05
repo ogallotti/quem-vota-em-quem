@@ -63,49 +63,149 @@ export function goodman(x, y, w) {
   return { a, b, est: a + b, lo: a + b - 1.96 * se, hi: a + b + 1.96 * se, se };
 }
 
+// gerador determinístico (mulberry32): o bootstrap dá sempre os mesmos números para o mesmo recorte
+function rng(seed) {
+  return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+const pct = (arr, q) => { const v = arr.filter(Number.isFinite).sort((a, b) => a - b); return v.length ? v[Math.min(v.length - 1, Math.max(0, Math.round(q * (v.length - 1))))] : null; };
+
+/**
+ * Estatísticas pontuais sobre unidades (u = vetor de unidades; m = multiplicidade de cada uma, para o bootstrap).
+ *   r       correlação ponderada (pesos = comparecimento)
+ *   rw      correlação DENTRO dos agrupamentos (ex.: municípios): x e y menos a média do próprio município. Separa
+ *           "fortes na mesma região" (r alto, rw ~ 0) de "fortes nos mesmos lugares dentro das cidades" (rw alto).
+ *   lift    afinidade: y no lugar médio do eleitor de X ÷ y no recorte
+ *   est     fração dos eleitores de X que votaram em Y: Goodman (y = a + b·x) aplicado a cada unidade e preso aos
+ *           limites certos daquela unidade; a soma fecha a conta exata dos votos. demais = o mesmo para quem não votou em X.
+ */
+function pontos(U, m, comBounds) {
+  const n = U.x.length;
+  let sw = 0, sx = 0, sy = 0, tvx = 0, tvy = 0, tdy = 0, yx = 0;
+  for (let i = 0; i < n; i++) {
+    const k = m ? m[i] : 1;
+    if (!k) continue;
+    const w = U.w[i] * k;
+    sw += w; sx += w * U.x[i]; sy += w * U.y[i];
+    tvx += U.vx[i] * k; tvy += U.vy[i] * k; tdy += U.dy[i] * k; yx += U.vx[i] * k * U.y[i];
+  }
+  if (!(sw > 0)) return { r: null, rw: null, lift: null, est: null, demais: null };
+  const mx = sx / sw, my = sy / sw;
+  let cxx = 0, cyy = 0, cxy = 0;
+  for (let i = 0; i < n; i++) {
+    const k = m ? m[i] : 1;
+    if (!k) continue;
+    const w = U.w[i] * k, dx = U.x[i] - mx, dy = U.y[i] - my;
+    cxx += w * dx * dx; cyy += w * dy * dy; cxy += w * dx * dy;
+  }
+  const r = cxx > 0 && cyy > 0 ? cxy / Math.sqrt(cxx * cyy) : null;
+  // dentro dos agrupamentos: desvio de cada unidade em relação à média ponderada do próprio agrupamento
+  let rw = null;
+  if (U.cl) {
+    const nc = U.nc, cw = new Float64Array(nc), cx = new Float64Array(nc), cy = new Float64Array(nc), cn = new Int32Array(nc);
+    for (let i = 0; i < n; i++) { const k = m ? m[i] : 1; if (!k) continue; const c = U.cl[i], w = U.w[i] * k; cw[c] += w; cx[c] += w * U.x[i]; cy[c] += w * U.y[i]; cn[c] += 1; }
+    let wxx = 0, wyy = 0, wxy = 0, usados = 0;
+    for (let i = 0; i < n; i++) {
+      const k = m ? m[i] : 1, c = U.cl[i];
+      if (!k || cn[c] < 2) continue;
+      const w = U.w[i] * k, dx = U.x[i] - cx[c] / cw[c], dy = U.y[i] - cy[c] / cw[c];
+      wxx += w * dx * dx; wyy += w * dy * dy; wxy += w * dx * dy; usados++;
+    }
+    rw = usados >= 8 && wxx > 0 && wyy > 0 ? wxy / Math.sqrt(wxx * wyy) : null;
+  }
+  const lift = tvx > 0 && tvy > 0 && tdy > 0 ? (yx / tvx) / (tvy / tdy) : null;
+  let est = null, demais = null, a = null, b = null;
+  if (comBounds && tvx > 0) {
+    const sxx = (() => { let t = 0; for (let i = 0; i < n; i++) { const k = m ? m[i] : 1; if (k) t += U.w[i] * k * U.x[i] * U.x[i]; } return t; })();
+    const det = sw * sxx - sx * sx;
+    if (det > 1e-15) {
+      let sxy = 0;
+      for (let i = 0; i < n; i++) { const k = m ? m[i] : 1; if (k) sxy += U.w[i] * k * U.x[i] * U.y[i]; }
+      b = (sw * sxy - sx * sy) / det; a = (sy - b * sx) / sw;
+    } else { a = sy / sw; b = 0; }
+    let comum = 0, tN = 0;
+    for (let i = 0; i < n; i++) {
+      const k = m ? m[i] : 1;
+      if (!k) continue;
+      tN += U.N[i] * k;
+      if (!U.vx[i]) continue;
+      const beta = Math.min(U.hi[i] / U.vx[i], Math.max(U.lo[i] / U.vx[i], a + b));
+      comum += beta * U.vx[i] * k;
+    }
+    est = comum / tvx;
+    demais = tN - tvx > 0 ? Math.min(1, Math.max(0, (tvy - comum) / (tN - tvx))) : null;
+  }
+  return { r, rw, lift, est, demais, a, b };
+}
+
 /**
  * Análise completa de um recorte.
  * @param {object} o
  *   secs       índices das seções do recorte
  *   grupo/nG   agrupamento das seções nas unidades de análise (normalmente locais de votação)
+ *   cluster    (opcional) agrupamento das unidades em blocos maiores (municípios): correlação dentro deles e bootstrap
  *   X, Y       votos por seção; DX, DY = comparecimento da eleição de cada um (presidente inclui o voto em trânsito)
  *   exclusivos true quando X e Y disputam a mesma vaga (mesmo cargo, um voto por eleitor): ninguém vota nos dois
+ *   B          réplicas do bootstrap (0 = sem intervalos)
  */
-export function analisa({ secs, grupo, nG, X, Y, DX, DY, exclusivos = false }) {
+export function analisa({ secs, grupo, nG, cluster = null, X, Y, DX, DY, exclusivos = false, B = 200 }) {
   const { gx, gy, gdx, gdy } = somaGrupos(secs, grupo, nG, X, Y, DX, DY);
+  // limites certos seção a seção, somados por unidade (e no recorte)
+  const glo = new Float64Array(nG), ghi = new Float64Array(nG), gN = new Float64Array(nG);
+  let lo = 0, hi = 0;
+  for (const s of secs) {
+    const g = grupo[s];
+    const N = Math.max(DX[s], DY[s]);
+    const h = Math.min(X[s], Y[s]), l = Math.max(0, X[s] + Y[s] - N);
+    hi += h; lo += l;
+    if (g >= 0) { ghi[g] += h; glo[g] += l; gN[g] += N; }
+  }
   let tx = 0, ty = 0, tdx = 0, tdy = 0;
-  const xs = [], ys = [], ws = [], vx = [], gi = [];
+  const U = { x: [], y: [], w: [], vx: [], vy: [], dy: [], lo: [], hi: [], N: [], cl: cluster ? [] : null, nc: 0 };
+  const gi = [], clMap = new Map();
   for (let g = 0; g < nG; g++) {
     if (!(gdx[g] > 0 && gdy[g] > 0)) continue;
     tx += gx[g]; ty += gy[g]; tdx += gdx[g]; tdy += gdy[g];
-    xs.push(gx[g] / gdx[g]); ys.push(gy[g] / gdy[g]); ws.push(gdx[g]); vx.push(gx[g]); gi.push(g);
+    U.x.push(gx[g] / gdx[g]); U.y.push(gy[g] / gdy[g]); U.w.push(gdx[g]); U.vx.push(gx[g]); U.vy.push(gy[g]); U.dy.push(gdy[g]);
+    U.lo.push(glo[g]); U.hi.push(ghi[g]); U.N.push(gN[g]); gi.push(g);
+    if (cluster) { const c = cluster[g]; if (!clMap.has(c)) clMap.set(c, clMap.size); U.cl.push(clMap.get(c)); }
   }
+  U.nc = clMap.size;
   const px = tdx > 0 ? tx / tdx : 0, py = tdy > 0 ? ty / tdy : 0;
-  // afinidade: Y no lugar médio do eleitor de X (média de y ponderada pelos votos de X) ÷ Y no recorte
-  let yx = 0;
-  for (let i = 0; i < ys.length; i++) yx += vx[i] * ys[i];
-  yx = tx > 0 ? yx / tx : null;
+  const p = pontos(U, null, !exclusivos);
   const out = {
-    tx, ty, tdx, tdy, px, py, n: xs.length, xs, ys, ws, gi,
-    r: pearson(xs, ys, ws), yx, lift: yx != null && py > 0 ? yx / py : null, exclusivos,
+    tx, ty, tdx, tdy, px, py, n: U.x.length, xs: U.x, ys: U.y, ws: U.w, gi, nc: U.nc,
+    r: p.r, rw: p.rw, yx: p.lift != null ? p.lift * py : null, lift: p.lift, exclusivos, ci: {},
   };
-  // limites certos, seção a seção
   if (!exclusivos) {
-    let lo = 0, hi = 0;
-    for (const s of secs) {
-      const N = Math.max(DX[s], DY[s]);
-      hi += Math.min(X[s], Y[s]);
-      lo += Math.max(0, X[s] + Y[s] - N);
-    }
     out.lim = { lo, hi, loF: tx > 0 ? lo / tx : null, hiF: tx > 0 ? hi / tx : null };
-    const g = goodman(xs, ys, ws);
-    if (g && tx > 0) {
-      const c = (v) => Math.min(out.lim.hiF, Math.max(out.lim.loF, v));
-      out.gd = { ...g, raw: g.est, est: c(g.est), lo: c(g.lo), hi: c(g.hi), fora: g.est < out.lim.loF || g.est > out.lim.hiF, demais: Math.min(1, Math.max(0, g.a)) };
+    if (p.est != null) {
+      const bruto = p.a + p.b;
+      out.gd = { est: p.est, demais: p.demais, a: p.a, b: p.b, raw: bruto, fora: bruto < out.lim.loF - 1e-9 || bruto > out.lim.hiF + 1e-9 };
     }
+  }
+  // bootstrap em blocos: reamostra municípios (se houver 8 ou mais) ou as próprias unidades
+  const n = U.x.length;
+  if (B > 0 && n >= 3) {
+    const blocos = U.nc >= 8 ? U.nc : n, deBloco = U.nc >= 8 ? U.cl : null;
+    const rnd = rng(0x5eed + n * 31 + Math.round(tx));
+    const m = new Int32Array(n), cnt = new Int32Array(blocos);
+    const reps = { r: [], rw: [], lift: [], est: [] };
+    for (let b = 0; b < B; b++) {
+      cnt.fill(0);
+      for (let j = 0; j < blocos; j++) cnt[Math.floor(rnd() * blocos)]++;
+      for (let i = 0; i < n; i++) m[i] = cnt[deBloco ? deBloco[i] : i];
+      const q = pontos(U, m, !exclusivos);
+      reps.r.push(q.r); reps.rw.push(q.rw); reps.lift.push(q.lift); reps.est.push(q.est);
+    }
+    for (const k of Object.keys(reps)) { const lo95 = pct(reps[k], 0.025), hi95 = pct(reps[k], 0.975); if (lo95 != null) out.ci[k] = [lo95, hi95]; }
+    out.ci.blocos = deBloco ? 'municípios' : 'unidades';
+    if (out.gd && out.ci.est) { out.gd.lo = out.ci.est[0]; out.gd.hi = out.ci.est[1]; }
   }
   return out;
 }
+
+/** Proporção encolhida em direção à média (bayes empírico simples): unidades pequenas não viram extremos falsos. */
+export const encolhe = (v, d, media, k = 40) => (d + k > 0 ? (v + k * media) / (d + k) : media);
 
 /** Leitura em palavras da correlação. */
 export function forca(r) {
@@ -119,7 +219,7 @@ export function forca(r) {
  * Leitura combinada de correlação e afinidade. Em candidatos de voto concentrado a correlação fica baixa mesmo quando
  * os territórios claramente coincidem (ou se excluem); a afinidade capta isso. Nível 0 (nada) a 3 (forte).
  */
-export function leitura(r, lift) {
+export function leitura(r, lift, ci = {}) {
   const nr = r == null ? 0 : Math.abs(r) >= 0.4 ? 3 : Math.abs(r) >= 0.2 ? 2 : Math.abs(r) >= 0.1 ? 1 : 0;
   const sr = r == null || nr === 0 ? 0 : Math.sign(r);
   let nl = 0, sl = 0;
@@ -128,6 +228,9 @@ export function leitura(r, lift) {
     nl = f >= 2 ? 3 : f >= 1.5 ? 2 : f >= 1.2 ? 1 : 0;
     sl = nl ? (lift >= 1 ? 1 : -1) : 0;
   }
+  // com intervalos: se os dois cruzam o neutro (r = 0 e afinidade = 1), o sinal não se distingue do acaso
+  const cruzaR = ci.r && ci.r[0] <= 0 && ci.r[1] >= 0, cruzaL = !ci.lift || (ci.lift[0] <= 1 && ci.lift[1] >= 1);
+  if ((nr || nl) && cruzaR && cruzaL) return { k: 'inc', nivel: 0 };
   if (sr && sl && sr !== sl) return { k: 'mix', nivel: Math.max(nr, nl) };
   const nivel = Math.max(nr, nl), s = sr || sl;
   return { k: nivel === 0 ? 'zero' : s > 0 ? 'pos' : 'neg', nivel };

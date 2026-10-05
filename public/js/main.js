@@ -1,101 +1,116 @@
-// Controlador: par (X, Y), lente, seleção, carga em fases, controles, busca, gaveta do celular e URL compartilhável.
-import { A, exclusivos, porUnidade, rPorUnidade, recorte, setPar, unidadesNoRecorte, valorDe } from './analise.js';
-import { D, LEVEL_INFO, buildSearchIndex, candOf, focusGeometry, getProps, loadCore, loadLazy, loadPolys, loadSerie, parentChain, search } from './data.js';
+// Controlador: Brasil ↔ estado, par (X, Y), lente, recorte, carga sob demanda, endereço compartilhável, teclado e
+// gaveta do celular. Zero backend: só arquivos estáticos.
+import { A, porUnidade, rPorUnidade, recorte, setPar, unidadesNoRecorte, valorDe } from './analise.js';
+import { BR, D, LEVEL_INFO, candOf, focusGeometry, getProps, loadAf, loadBR, loadBrMun, loadCands, loadMunPolys, loadNomes, loadSerie, loadUF, loadZB, munOf, parentChain } from './data.js';
+import { abrirBusca, buscaAberta, fecharBusca } from './busca.js';
 import { clear, h } from './fmt.js';
 import { MapView } from './map.js';
-import { Panel, Tooltip, classeBiv, nomeCand, renderCrumbs, renderLegend } from './panel.js';
-import { closePicker, openPicker, pickerAberto } from './picker.js';
-import { BIV, DIV, LENTES, NOVOTE, RAMP, SEM_DADO, classeR, classeSeq, classesSeq } from './scales.js';
-import { quantis } from './stats.js';
+import { Tooltip, classeBiv, renderCrumbs, renderLegend, renderMain, renderMainBR, renderSide, renderSideBR } from './panel.js';
+import { BIV, DIV, LADO, LENTES, NOVOTE, RAMP, SEM_DADO, XT, classeLado, classeR, classeSeq, classesSeq } from './scales.js';
+import { quantis, terco } from './stats.js';
+import { ICON } from './ui.js';
 
 const $ = (id) => document.getElementById(id);
-const state = { x: null, y: null, lente: 'bi', mode: 'auto', sel: { level: 'estado', id: 0 } };
+const CRUMBS = $('crumbs'); // mora dentro da barra do mapa (que é refeita a cada mudança)
+const state = { modo: 'br', uf: null, x: null, y: null, lente: 'xt', mode: 'auto', sel: { level: 'estado', id: 0 }, tab: 'junto', afCargo: null, ondeOrd: 'x', mais: false };
 const touch = matchMedia('(pointer: coarse)').matches || (navigator.maxTouchPoints > 0 && matchMedia('(hover: none)').matches);
-let view, panel, tooltip, polos = null;
+let view, tooltip, polos = null, sugestoes = null;
+window.__state = state;
 
-// ------------------------------------------------------------------ layout pelo aparelho, não pela largura do iframe
-// Em alguns hosts (ex.: claude.ai no celular) a página é desenhada com largura de desktop e reduzida. Nesse caso o app é
-// montado na largura real da tela e ampliado por transform; o CSS de celular vale pela classe html.m.
+// ------------------------------------------------------------------ layout pelo aparelho (não pela largura do iframe)
 const UI = { k: 1, m: false, ml: false };
 function computeLayout() {
   const sw = screen.width || innerWidth;
   const k = touch && sw < 1000 && innerWidth > sw * 1.15 ? innerWidth / sw : 1;
   const W = innerWidth / k, H = innerHeight / k;
-  const m = W <= 900, ml = m && H <= 520;
+  const m = W <= 820, ml = m && H <= 520;
   const app = $('app');
   if (k !== 1) Object.assign(app.style, { width: `${W}px`, height: `${H}px`, transform: `scale(${k})` });
   else Object.assign(app.style, { width: '', height: '', transform: '' });
   document.documentElement.classList.toggle('m', m);
   document.documentElement.classList.toggle('ml', ml);
-  const mudou = UI.k !== k || UI.m !== m || UI.ml !== ml;
   Object.assign(UI, { k, m, ml });
   window.__uiK = k;
-  return mudou;
 }
 const mobile = () => UI.m;
-const pixelRatio = () => Math.min(3, (window.devicePixelRatio || 1) * UI.k, touch ? 2.5 : 3);
-function rectIn(el) {
-  const a = $('app').getBoundingClientRect(), r = el.getBoundingClientRect(), k = UI.k;
-  return { top: (r.top - a.top) / k, bottom: (r.bottom - a.top) / k, left: (r.left - a.left) / k, right: (r.right - a.left) / k, width: r.width / k, height: r.height / k };
-}
 computeLayout();
 
-// ------------------------------------------------------------------ URL
-const parseHash = () => Object.fromEntries(new URLSearchParams(location.hash.slice(1)));
-let hashTimer = 0;
-function writeHash() {
-  clearTimeout(hashTimer);
-  hashTimer = setTimeout(() => {
-    if (!view || !state.x) return;
-    const c = view.camera();
-    const q = new URLSearchParams({ uf: D.meta.uf.toLowerCase(), x: state.x, y: state.y, l: state.lente, c: [c.lng, c.lat, c.z].join(',') });
-    if (state.mode !== 'auto') q.set('n', state.mode);
-    if (state.sel.level !== 'estado') q.set('s', `${state.sel.level}:${state.sel.id}`);
-    history.replaceState(null, '', '#' + q.toString().replace(/%3A/g, ':').replace(/%2C/g, ','));
-  }, 350);
-}
-
-let toastTimer = 0;
-function toast(msg, ms = 2200) {
-  let el = $('toast');
-  if (!el) { el = h('div', { id: 'toast', class: 'toast', role: 'status' }); $('app').append(el); }
-  el.textContent = msg; el.hidden = false;
-  clearTimeout(toastTimer);
-  if (ms) toastTimer = setTimeout(() => { el.hidden = true; }, ms);
-}
-
-let polysPromise = null;
-function ensurePolys() {
-  if (D.polysReady) return Promise.resolve();
-  if (!polysPromise) {
-    toast('Carregando locais e seções…', 0);
-    polysPromise = loadPolys().then(() => { view.addPolyLevel('local'); view.addPolyLevel('secao'); toast('Locais e seções prontos', 1200); })
-      .catch((err) => { polysPromise = null; toast('Não foi possível carregar locais e seções'); throw err; });
+function padding() {
+  if (mobile()) {
+    const H = $('app').offsetHeight, sh = UI.ml ? 0 : $('sheet').offsetHeight;
+    return UI.ml ? { top: 70, left: 12, right: $('sheet').offsetWidth + 12, bottom: 20 } : { top: 100, left: 16, right: 16, bottom: Math.min(H * 0.6, sh) + 16 };
   }
-  return polysPromise;
+  const focus = document.body.classList.contains('focus');
+  const W = $('app').offsetWidth;
+  return { top: 110, left: focus ? 40 : 420 + 40, right: focus || W <= 1100 ? 40 : 360 + 40, bottom: 40 };
 }
 
-// ------------------------------------------------------------------ pintura do mapa (depende de X, Y, lente e recorte)
+// ------------------------------------------------------------------ aviso curto
+let toastT = 0;
+function toast(msg, ms = 2200) {
+  const el = $('toast');
+  el.textContent = msg; el.hidden = !msg;
+  clearTimeout(toastT);
+  if (ms && msg) toastT = setTimeout(() => { el.hidden = true; }, ms);
+}
+
+// ------------------------------------------------------------------ endereço compartilhável
+const parseHash = () => Object.fromEntries(new URLSearchParams(location.hash.slice(1)));
+let hashT = 0, aplicandoHash = false;
+function writeHash() {
+  clearTimeout(hashT);
+  hashT = setTimeout(() => {
+    if (aplicandoHash) return;
+    const q = new URLSearchParams();
+    if (state.modo === 'uf') {
+      q.set('uf', state.uf); q.set('x', state.x); q.set('y', state.y);
+      if (state.lente !== 'xt') q.set('l', state.lente);
+      if (state.sel.level !== 'estado') q.set('s', `${state.sel.level}:${state.sel.id}`);
+    }
+    const s = q.toString().replace(/%3A/g, ':');
+    if (location.hash.slice(1) !== s) history.replaceState(null, '', s ? `#${s}` : location.pathname);
+  }, 250);
+}
+
+// ------------------------------------------------------------------ pintura
+function pintarBR() {
+  const porId = { uf: new Map(BR.states.features.map((f) => [f.properties.id, f.properties])), brmun: new Map((BR.mun?.features || []).map((f) => [f.properties.id, f.properties])) };
+  view.setPaint({ palette: LADO, none: SEM_DADO, k: (lv, id) => { const p = porId[lv]?.get(id); return p ? classeLado(p.esq, p.dir) : -1; }, label: () => '' });
+  renderLegend($('legend'), { lente: 'br' });
+}
+
 function pintar() {
-  if (!A.X || !view) return;
+  if (!A.X || !view || state.modo !== 'uf') return;
   const { level: sl, id: si } = state.sel;
   const r = recorte(sl, si);
   const lente = state.lente;
-  const ctx = { px: r.px, py: r.py };
-  const fora = (lv, id) => { const set = unidadesNoRecorte(lv, sl, si); return set && !set.has(id); }; // fora do recorte: k = −2 (apagado)
-  const classesPorNivel = new Map();
+  state.ctx = { px: r.px, py: r.py };
+  const fora = (lv, id) => { const set = unidadesNoRecorte(lv, sl, si); return set && !set.has(id); };
+  const cache = new Map();
   const seq = (lv) => {
-    if (!classesPorNivel.has(lv)) {
+    if (!cache.has(lv)) {
       const u = D.un[lv], v = porUnidade(lv), set = unidadesNoRecorte(lv, sl, si), vals = [];
       for (let g = 0; g < u.ids.length; g++) if (!set || set.has(u.ids[g])) { const d = lente === 'x' ? v.dx[g] : v.dy[g]; if (d > 0) vals.push((lente === 'x' ? v.x[g] : v.y[g]) / d); }
-      classesPorNivel.set(lv, classesSeq(RAMP[lente], quantis(vals, 7)));
+      cache.set(lv, classesSeq(RAMP[lente] || RAMP.x, quantis(vals, 7)));
     }
-    return classesPorNivel.get(lv);
+    return cache.get(lv);
   };
+  state.seq = seq;
   let paint;
-  if (lente === 'bi') {
-    paint = { palette: BIV, none: SEM_DADO, k: (lv, id) => (fora(lv, id) ? -2 : classeBiv(valorDe(lv, id), ctx.px, ctx.py)), label: () => '' };
-  } else if (lente === 'r') {
+  if (lente === 'xt') {
+    paint = {
+      palette: XT, none: SEM_DADO,
+      k: (lv, id) => {
+        if (fora(lv, id)) return -2;
+        const v = valorDe(lv, id);
+        if (!v || !(v.dx > 0)) return -1;
+        const iy = terco(v.ey, r.py);
+        return v.x > 0 && terco(v.ex, r.px) === 2 ? iy : 3 + iy; // território = X acima de 1,25× a média do recorte
+      },
+      label: () => '',
+    };
+  } else if (lente === 'bi') paint = { palette: BIV, none: SEM_DADO, k: (lv, id) => (fora(lv, id) ? -2 : classeBiv(valorDe(lv, id), r.px, r.py)), label: () => '' };
+  else if (lente === 'r') {
     paint = {
       palette: DIV, none: SEM_DADO, clamp: LENTES.r.clamp,
       k: (lv, id) => (fora(lv, id) ? -2 : classeR(rPorUnidade(lv)[D.un[lv].pos.get(id)])),
@@ -108,329 +123,285 @@ function pintar() {
       label: (lv, p) => { const v = valorDe(lv, p.id); const x = v && (lente === 'x' ? v.px : v.py); return x > 0 ? `${(x * 100).toLocaleString('pt-BR', { maximumFractionDigits: x < 0.1 ? 1 : 0 })}%` : ''; },
     };
   }
-  state.ctx = ctx;
-  state.seq = seq; // antes do setPaint: ele dispara onView, que redesenha a legenda
   view.setPaint(paint);
   legenda();
 }
 
-/** A legenda depende do nível visível (faixas das lentes de votos) e do recorte. */
 function legenda() {
-  if (!state.seq) return;
+  if (state.modo !== 'uf' || !state.seq) return;
   const { level: sl, id: si } = state.sel, lente = state.lente;
-  renderLegend($('legend'), { lente, classes: lente === 'x' || lente === 'y' ? state.seq(view.view?.poly || 'municipio') : null, escopo: sl === 'estado' ? 'do estado' : `de ${sl === 'secao' ? `Seção ${getProps(sl, si)?.nr}` : getProps(sl, si)?.n || ''}` });
+  renderLegend($('legend'), { lente, classes: lente === 'x' || lente === 'y' ? state.seq(view.view?.poly || 'municipio') : null, escopo: sl === 'estado' ? 'do estado' : `de ${getProps(sl, si)?.n || ''}` });
+}
+
+// ------------------------------------------------------------------ cartões
+const ctxSide = () => ({
+  tab: state.tab, afCargo: state.afCargo, ondeOrd: state.ondeOrd, mais: state.mais, polos,
+  onTab: (t) => { state.tab = t; renderCards(); },
+  onAfCargo: (c) => { state.afCargo = c; renderCards(); },
+  onOndeOrd: (o) => { state.ondeOrd = o; renderCards(); },
+  onMais: () => { state.mais = true; renderCards(); },
+  onY: (k) => ctl.setY(k), onSelect: (l, i) => ctl.select(l, i),
+  onPick: (lado) => abrirPicker(lado), onSwap: () => ctl.trocar(),
+});
+function renderCards() {
+  if (state.modo === 'br') {
+    renderMainBR($('main-card'), { onSearch: () => abrirPicker('livre'), onCand: escolherCand, sugestoes });
+    renderSideBR($('side-card'), (uf) => ctl.entrar(uf));
+    return;
+  }
+  const c = ctxSide();
+  renderMain($('main-card'), state.sel.level, state.sel.id, c);
+  renderSide($('side-card'), state.sel.level, state.sel.id, c);
+  state.afCargo = c.afCargo;
+}
+
+const curtoNome = (k) => { const p = (candOf(k)?.nome || '').split(' '); return p.length > 2 ? `${p[0]} ${p[p.length - 1]}` : p.join(' '); };
+function renderTop() {
+  $('uf-pill').textContent = state.modo === 'uf' ? D.meta.uf_nome : 'Brasil';
+  const mb = $('mapbar');
+  clear(mb);
+  if (state.modo !== 'uf') { mb.hidden = true; clear(CRUMBS); return; }
+  mb.hidden = false;
+  const seg = h('div', { class: 'seg', role: 'radiogroup', 'aria-label': 'O que pintar' });
+  const nomes = { xt: `Onde ${curtoNome(state.x)} é forte`, bi: 'Os dois', x: curtoNome(state.x), y: curtoNome(state.y), r: 'Correlação' };
+  for (const id of ['xt', 'bi', 'x', 'y', 'r']) seg.append(h('button', { type: 'button', role: 'radio', 'aria-checked': String(state.lente === id), class: state.lente === id ? 'on' : '', title: LENTES[id].desc, onclick: () => ctl.setLente(id) }, nomes[id]));
+  const niv = h('div', { class: 'seg', role: 'radiogroup', 'aria-label': 'Nível do mapa' });
+  for (const [id, t] of [['auto', 'Auto'], ['municipio', 'Municípios'], ['bairro', 'Bairros'], ['local', 'Locais'], ['secao', 'Seções']]) niv.append(h('button', { type: 'button', role: 'radio', 'aria-checked': String(state.mode === id), class: state.mode === id ? 'on' : '', onclick: () => ctl.setMode(id) }, t));
+  mb.append(seg, niv, CRUMBS);
 }
 
 // ------------------------------------------------------------------ controle
 const ctl = {
+  /** Abre um estado (com par, lente e seleção opcionais). */
+  async entrar(uf, { x = null, y = null, sel = null, lente = null } = {}) {
+    if (!BR.ufs.get(uf)?.ok) { toast('Os dados deste estado ainda estão sendo processados'); return; }
+    fecharBusca();
+    const trocou = state.uf !== uf;
+    if (trocou) {
+      toast(`Abrindo ${BR.ufs.get(uf).n}…`, 0);
+      await loadUF(uf);
+      view.clearUF();
+      state.uf = uf;
+      state.mode = 'auto'; view.setMode('auto');
+    }
+    const pk = D.meta.polos || {};
+    const gov = D.cargos.get(3)?.cands[0]?.key || [...D.cand.keys()][0];
+    x = x && candOf(x) ? x : state.x && !trocou && state.modo === 'uf' ? state.x : gov;
+    y = y && candOf(y) && y !== x ? y : (pk.esq && pk.esq !== x ? pk.esq : pk.dir);
+    const [X, Y, E, Dr] = await Promise.all([loadSerie(x), loadSerie(y), pk.esq ? loadSerie(pk.esq) : null, pk.dir ? loadSerie(pk.dir) : null]);
+    polos = { esq: E && { key: pk.esq, serie: E }, dir: Dr && { key: pk.dir, serie: Dr } };
+    Object.assign(state, { modo: 'uf', x, y, afCargo: null, mais: false });
+    if (lente && LENTES[lente]) state.lente = lente;
+    setPar(x, X, y, Y);
+    view.setModo('uf');
+    for (const l of ['macro', 'municipio']) view.addLevel(l);
+    toast('');
+    document.body.classList.add('uf');
+    if (sel && getProps(sel.level, sel.id)) await ctl.select(sel.level, sel.id);
+    else ctl.select('estado', 0, { fit: trocou || state.sel.level === 'br' });
+    // camadas e listas em segundo plano
+    loadZB().then(() => { if (state.uf === uf) { view.addLevel('zona'); view.addLevel('bairro'); pintar(); renderCards(); } }).catch(() => {});
+    loadAf().then(() => { if (state.uf === uf) renderCards(); }).catch(() => {});
+    loadNomes().then(() => { if (state.uf === uf && state.modo === 'uf') renderCards(); }).catch(() => {});
+  },
+  irBrasil() {
+    fecharBusca();
+    Object.assign(state, { modo: 'br', sel: { level: 'br', id: 0 } });
+    document.body.classList.remove('uf');
+    view.setFocus(null); view.setSelection(null); view.setModo('br');
+    pintarBR(); renderTop(); renderCards(); view.fit('br', 0);
+    writeHash();
+  },
   async setPar(x, y) {
     if (!candOf(x) || !candOf(y) || x === y) return;
     const [X, Y] = await Promise.all([loadSerie(x), loadSerie(y)]);
-    state.x = x; state.y = y;
+    state.x = x; state.y = y; state.afCargo = null;
     setPar(x, X, y, Y);
-    renderPergunta();
-    pintar();
-    panel.render(state.sel.level, state.sel.id);
-    syncControls();
-    writeHash();
+    pintar(); renderTop(); renderCards(); writeHash();
   },
   setX(x) { return ctl.setPar(x, x === state.y ? state.x : state.y); },
   setY(y) { return ctl.setPar(y === state.x ? state.y : state.x, y); },
   trocar() { return ctl.setPar(state.y, state.x); },
-  select(level, id, opts = {}) {
-    if (level !== 'estado' && !getProps(level, id)) return;
-    if ((level === 'local' || level === 'secao') && !D.polysReady) { ensurePolys().then(() => ctl.select(level, id, opts), () => {}); return; }
+  async select(level, id, { fit = true } = {}) {
+    if (state.modo !== 'uf' || (level !== 'estado' && !getProps(level, id))) return;
     state.sel = { level, id };
+    state.mais = false;
     const min = { macro: 'municipio', municipio: getProps('municipio', id)?.bb ? 'bairro' : 'local', zona: 'local', bairro: 'local', local: 'secao', secao: 'secao' }[level];
     view.setMinLevel(min);
-    if (min === 'local' || min === 'secao') ensurePolys().catch(() => {});
+    const mi = munOf(level, id);
+    if (mi != null && (min === 'local' || min === 'secao')) carregarPolys([mi]);
     view.setSelection(level, id);
     view.setFocus(focusGeometry(level, id));
     pintar();
-    panel.render(level, id);
-    renderCrumbs($('crumbs'), level, id, (l, i) => ctl.select(l, i));
-    document.body.classList.toggle('has-sel', level !== 'estado');
-    if (mobile() && $('panel-wrap').dataset.snap === 'full') setSnap('peek', { refit: false });
-    if (opts.fit !== false) view.fit(level, id);
-    syncControls();
+    renderCards();
+    renderTop();
+    renderCrumbs(CRUMBS, level, id, (l, i) => ctl.select(l, i));
+    if (fit) view.fit(level, id);
+    if (mobile() && $('sheet').dataset.snap === 'full') setSnap('half');
     writeHash();
   },
-  setLente(id) {
-    if (!LENTES[id]) return;
-    state.lente = id;
-    pintar();
-    syncControls();
-    writeHash();
-  },
-  setMode(mode) {
-    if ((mode === 'local' || mode === 'secao') && !D.polysReady) { ensurePolys().then(() => ctl.setMode(mode), () => {}); return; }
-    state.mode = mode;
-    view.setMode(mode);
-    syncControls();
-    writeHash();
-  },
+  setLente(id) { if (!LENTES[id]) return; state.lente = id; pintar(); renderTop(); writeHash(); },
+  setMode(m) { state.mode = m; view.setMode(m); if (m === 'local' || m === 'secao') carregarPolys(view.municipiosVisiveis().slice(0, 12)); renderTop(); },
 };
-window.__ctl = ctl; // depuração e testes
-window.__state = state;
+window.__ctl = ctl;
 
-// ------------------------------------------------------------------ a pergunta (topo)
-function renderPergunta() {
-  const bt = (lado, key) => {
-    const c = candOf(key);
-    const polo = polos && (key === polos.esq?.key ? 'Esquerda · ' : key === polos.dir?.key ? 'Direita · ' : '');
-    return h('button', { type: 'button', class: `q-b q-${lado}`, onclick: () => abrirPicker(lado), title: `Trocar ${lado.toUpperCase()}`, 'aria-label': `${lado.toUpperCase()}: ${c.nome}. Trocar` },
-      h('b', null, `${polo || ''}${c.nome}`), h('span', null, `${D.cargos.get(c.cargo).nome} · ${c.partido} ${c.n}`), h('i', { 'aria-hidden': 'true' }, '▾'));
-  };
-  clear($('q')).append(
-    h('span', { class: 'q-t' }, 'Quem vota em'), bt('x', state.x), h('span', { class: 'q-t' }, 'vota em'), bt('y', state.y), h('span', { class: 'q-t q-qm' }, '?'),
-    h('button', { type: 'button', class: 'q-swap ghost', onclick: () => ctl.trocar(), title: 'Inverter X e Y', 'aria-label': 'Inverter X e Y' }, '⇄'),
-  );
-  if (exclusivos()) $('q').append(h('span', { class: 'q-aviso' }, 'mesma vaga: compara territórios'));
-}
-
-function abrirPicker(lado) {
-  openPicker({
-    lado, atual: lado === 'x' ? state.x : state.y, outro: lado === 'x' ? state.y : state.x,
-    polos: polos ? { esq: polos.esq?.key, dir: polos.dir?.key } : null,
-    onPick: (key) => (lado === 'x' ? ctl.setX(key) : ctl.setY(key)),
+/** Polígonos de locais e seções: por município, só os da tela (ou o selecionado). */
+let carregando = 0;
+function carregarPolys(ibges) {
+  const novos = ibges.filter((i) => !D.munPolys.has(i));
+  if (!novos.length) return;
+  carregando++;
+  const uf = state.uf;
+  Promise.all(novos.map((i) => loadMunPolys(i).catch(() => false))).then((r) => {
+    carregando--;
+    if (r.some(Boolean) && state.modo === 'uf' && state.uf === uf) { view.addLevel('local'); view.addLevel('secao'); view.refreshFine(); }
   });
 }
 
-// ------------------------------------------------------------------ lateral (no celular vira a gaveta "Camadas")
-function buildControls() {
-  const box = $('lenses');
-  for (const L of Object.values(LENTES)) {
-    box.append(h('button', { type: 'button', role: 'radio', class: 'chipb lens-chip', dataset: { lente: L.id }, onclick: () => ctl.setLente(L.id) }, h('i', { class: `dot sw-${L.id}` }), L.label));
-  }
-  const lv = $('levels');
-  for (const [id, label] of [['auto', 'Auto'], ...['macro', 'municipio', 'zona', 'bairro', 'local', 'secao'].map((l) => [l, LEVEL_INFO[l].plural.replace('Locais de votação', 'Locais')])]) {
-    lv.append(h('button', { type: 'button', role: 'radio', class: 'chipb', dataset: { l: id }, disabled: id !== 'auto' && !['macro', 'municipio'].includes(id), onclick: () => ctl.setMode(id) }, label));
-  }
-  for (const b of document.querySelectorAll('[data-go]')) b.addEventListener('click', () => ctl.select('estado', 0));
+function escolherCand(c) {
+  if (c.uf === 'br' || (c.cargo === 1 && state.modo !== 'uf')) { escolherEstado(c); return; }
+  if (state.modo === 'uf' && (c.uf === state.uf || c.cargo === 1)) return ctl.setX(c.key);
+  return ctl.entrar(c.uf, { x: c.key });
 }
 
-function syncControls() {
-  document.querySelectorAll('[data-lente]').forEach((b) => { const on = b.dataset.lente === state.lente; b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on)); });
-  document.querySelectorAll('[data-l]').forEach((b) => { const on = b.dataset.l === state.mode; b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on)); });
-  $('lens-desc').textContent = LENTES[state.lente].desc.replace(/\bX\b/g, nomeCand(state.x) || 'X').replace(/\bY\b/g, nomeCand(state.y) || 'Y');
+/** Presidente concorre no país inteiro: pergunta em qual estado olhar. */
+function escolherEstado(c) {
+  const ufs = [...BR.ufs.values()].sort((a, b) => a.n.localeCompare(b.n, 'pt-BR'));
+  const lista = h('div', { class: 'pal-list' });
+  const bg = h('div', { class: 'pal-bg', onclick: (e) => { if (e.target === bg) bg.remove(); } });
+  for (const u of ufs) lista.append(h('button', { type: 'button', class: 'row', disabled: !u.ok || null, onclick: () => { bg.remove(); ctl.entrar(u.uf, { x: c.key }); } },
+    h('span', { class: 'av', style: { width: '30px', height: '30px' } }, h('b', { style: { fontSize: '11px', color: 'var(--ink-2)' } }, u.uf.toUpperCase())),
+    h('span', { class: 'row-n' }, h('b', null, u.n), h('span', null, u.ok ? '' : 'em processamento')), h('span')));
+  bg.append(h('div', { class: 'pal', role: 'dialog', 'aria-modal': 'true' }, h('div', { class: 'pal-ctx', style: { padding: '16px' } }, `${c.nome} concorre no Brasil inteiro. Em qual estado você quer ver quem vota em ${c.nome}?`), lista));
+  $('app').append(bg);
 }
 
-function enableLevels() {
-  document.querySelectorAll('[data-l]').forEach((b) => { const l = b.dataset.l; b.disabled = l !== 'auto' && !(l === 'local' || l === 'secao' || D.lv[l]?.ready); });
+function abrirPicker(modo) {
+  abrirBusca({
+    modo, polos: polos ? { esq: polos.esq?.key, dir: polos.dir?.key } : null,
+    onCand: (c) => {
+      if (modo === 'y') {
+        if (c.uf !== state.uf && c.cargo !== 1) { toast('Para comparar, Y precisa ser do mesmo estado (ou candidato a presidente)'); return; }
+        return ctl.setY(c.key);
+      }
+      return escolherCand(c);
+    },
+    onLugar: (l, i) => ctl.select(l, i),
+  });
 }
 
-// ------------------------------------------------------------------ celular
-function place(el, mobileParent, desktopParent, before) {
-  if (mobile()) mobileParent.append(el);
-  else if (before) desktopParent.insertBefore(el, before); else desktopParent.append(el);
-}
-function placeControls() {
-  place($('search-box'), $('mtop-search'), $('rail'), $('rail').querySelector('section'));
-  place($('btn-rail'), $('mtop-btn'), document.querySelector('.tools'), document.querySelector('.tools').firstChild);
-  place($('q'), $('mq'), $('q-home'));
-  place($('legend'), $('mbottom-legend'), $('app'), $('panel-wrap'));
-  document.body.classList.toggle('is-mobile', mobile());
-  if (!mobile()) closeRail();
-  measureSheet();
-  view?.resize();
-}
-function openRail() { document.body.classList.add('rail-open'); $('btn-rail').setAttribute('aria-expanded', 'true'); $('scrim').hidden = false; }
-function closeRail() { document.body.classList.remove('rail-open'); $('btn-rail').setAttribute('aria-expanded', 'false'); $('scrim').hidden = true; }
-
-function mobilePadding() {
-  const W = $('app').offsetWidth, H = $('app').offsetHeight;
-  const top = rectIn($('mq')).bottom + 10;
-  const mb = rectIn($('mbottom')), pw = rectIn($('panel-wrap'));
-  if (UI.ml) return { top, left: 12, right: Math.max(12, W - pw.left + 12), bottom: Math.max(12, H - mb.top + 10) };
-  const limite = Math.min(mb.height ? mb.top : H, pw.top);
-  return { top, left: 12, right: 12, bottom: Math.max(12, H - limite + 10) };
-}
-
+// ------------------------------------------------------------------ gaveta do celular
 const SNAPS = ['peek', 'half', 'full'];
-let snapTimer = 0;
-function setSnap(s, { refit = true } = {}) {
-  const wrap = $('panel-wrap');
-  if (wrap.dataset.snap === s) return;
-  wrap.dataset.snap = s;
-  document.body.dataset.snap = s;
-  requestAnimationFrame(measureSheet);
-  clearTimeout(snapTimer);
-  snapTimer = setTimeout(() => { measureSheet(); if (refit && s !== 'full' && view) view.fit(state.sel.level, state.sel.id, { duration: 450 }); }, 280);
+function setSnap(s) {
+  const sh = $('sheet');
+  if (sh.dataset.snap === s) return;
+  sh.dataset.snap = s;
+  if (s !== 'full') sh.scrollTop = 0;
+  setTimeout(() => { medir(); if (s !== 'full' && view && state.modo === 'uf') view.fit(state.sel.level, state.sel.id, { duration: 400 }); }, 280);
 }
-function measureSheet() {
-  const root = document.documentElement.style;
-  if (!mobile()) { root.removeProperty('--sheet-h'); root.removeProperty('--bottom-h'); return; }
-  const pw = $('panel-wrap');
-  root.setProperty('--sheet-h', `${UI.ml ? 0 : pw.offsetHeight}px`);
-  const mb = rectIn($('mbottom')), H = $('app').offsetHeight;
-  root.setProperty('--bottom-h', `${Math.round(H - (mb.height ? mb.top : H))}px`);
-}
+function medir() { document.documentElement.style.setProperty('--sheet-h', `${mobile() && !UI.ml ? $('sheet').offsetHeight : 0}px`); }
 function setupSheet() {
-  const wrap = $('panel-wrap');
-  let y0 = null, arrastou = false;
-  const podeArrastar = (e) => mobile() && !UI.ml && (e.target.closest('#sheet-handle') || wrap.dataset.snap === 'peek');
-  wrap.addEventListener('pointerdown', (e) => { if (!podeArrastar(e) || e.target.closest('button:not(#sheet-handle), a, input, select, summary, canvas')) return; y0 = e.clientY; arrastou = false; });
-  wrap.addEventListener('pointermove', (e) => { if (y0 != null && Math.abs(e.clientY - y0) / UI.k > 10) arrastou = true; });
-  wrap.addEventListener('pointerup', (e) => {
+  const sh = $('sheet'), handle = $('sheet-handle');
+  let y0 = null;
+  handle.addEventListener('pointerdown', (e) => { y0 = e.clientY; handle.setPointerCapture(e.pointerId); });
+  handle.addEventListener('pointerup', (e) => {
     if (y0 == null) return;
     const dy = (e.clientY - y0) / UI.k; y0 = null;
-    const i = SNAPS.indexOf(wrap.dataset.snap);
-    if (Math.abs(dy) >= 28) setSnap(SNAPS[Math.max(0, Math.min(SNAPS.length - 1, i + (dy < 0 ? 1 : -1)))]);
+    const i = SNAPS.indexOf(sh.dataset.snap);
+    if (Math.abs(dy) < 8) setSnap(SNAPS[(i + 1) % SNAPS.length]);
+    else setSnap(SNAPS[Math.max(0, Math.min(2, i + (dy < 0 ? 1 : -1)))]);
   });
-  wrap.addEventListener('pointercancel', () => { y0 = null; });
-  wrap.addEventListener('click', (e) => {
-    if (!mobile() || UI.ml || arrastou) { arrastou = false; return; }
-    if (e.target.closest('#sheet-handle')) { const i = SNAPS.indexOf(wrap.dataset.snap); setSnap(SNAPS[(i + 1) % SNAPS.length]); return; }
-    if (wrap.dataset.snap === 'peek' && !e.target.closest('button, a, input, select, summary')) setSnap('half');
-  });
-  new ResizeObserver(measureSheet).observe(wrap);
-  new ResizeObserver(measureSheet).observe($('mbottom'));
-}
-
-// ------------------------------------------------------------------ busca de lugares
-function setupSearch() {
-  const input = $('search'), list = $('results');
-  let items = [], cur = -1;
-  const close = () => { list.hidden = true; input.setAttribute('aria-expanded', 'false'); cur = -1; };
-  const pick = (it) => { close(); input.value = ''; input.blur(); ctl.select(it.level, it.id); };
-  const draw = () => {
-    items = search(input.value);
-    clear(list);
-    if (!items.length) { close(); return; }
-    items.forEach((it, i) => list.append(h('li', { role: 'option', id: `r${i}`, class: i === cur ? 'on' : '', onpointerdown: (ev) => { ev.preventDefault(); pick(it); } },
-      h('b', null, it.name), h('span', null, `${LEVEL_INFO[it.level].label}${it.sub ? ' · ' + it.sub : ''}`))));
-    list.hidden = false; input.setAttribute('aria-expanded', 'true');
-  };
-  input.addEventListener('input', () => { cur = -1; draw(); });
-  input.addEventListener('blur', () => setTimeout(close, 150));
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); cur = (cur + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % Math.max(items.length, 1); draw(); }
-    else if (e.key === 'Enter' && items.length) pick(items[Math.max(cur, 0)]);
-    else if (e.key === 'Escape') { input.value = ''; close(); input.blur(); }
-  });
+  new ResizeObserver(medir).observe(sh);
 }
 
 // ------------------------------------------------------------------ boot
-function setLoading(text, sub) { $('loading-t').textContent = text; $('loading-s').textContent = sub || ''; }
-function fail(err) {
-  console.error(err);
-  setLoading('Não foi possível carregar os dados', location.protocol === 'file:' ? 'Abra por um servidor web (por exemplo: python3 -m http.server --directory public).' : String(err.message || err));
-  $('loading').classList.add('error');
-}
-
-/** Par inicial: o da URL; senão o governador mais votado × Lula (esquerda). */
-function parInicial(q) {
-  const ok = (k) => k && candOf(k);
-  const gov = D.cargos.get(3)?.cands[0]?.key || [...D.cand.keys()][0];
-  const x = ok(q.x) ? q.x : gov;
-  let y = ok(q.y) && q.y !== x ? q.y : D.meta.polos?.esq || D.cargos.get(1)?.cands[0]?.key;
-  if (y === x) y = D.cargos.get(1)?.cands[1]?.key;
-  return [x, y];
+async function aplicarHash() {
+  const q = parseHash();
+  aplicandoHash = true;
+  try {
+    if (q.uf && BR.ufs.get(q.uf)?.ok) {
+      const [lv, idS] = (q.s || '').split(':');
+      await ctl.entrar(q.uf, { x: q.x, y: q.y, lente: q.l });
+      if (lv) {
+        if (['zona', 'bairro'].includes(lv)) await loadZB().catch(() => {});
+        await ctl.select(lv, Number(idS));
+      }
+    } else ctl.irBrasil();
+  } finally { aplicandoHash = false; writeHash(); }
 }
 
 async function boot() {
-  buildControls();
+  $('sb-i').append(ICON.busca());
   setupSheet();
   try {
-    setLoading('Carregando a votação…', 'municípios, locais de votação e seções');
-    await loadCore();
-    document.title = `Quem vota em quem · ${D.meta.uf_nome} 2026`;
-    $('brand-s').textContent = `Eleições 2026 · ${D.meta.uf_nome}`;
-    const q = parseHash();
-    const [x, y] = parInicial(q);
-    // polos esquerda × direita: votos em Lula e em Bolsonaro para presidente (carregados junto com o par)
-    const pk = D.meta.polos || {};
-    const [X, Y, E, Dr] = await Promise.all([loadSerie(x), loadSerie(y), pk.esq ? loadSerie(pk.esq) : null, pk.dir ? loadSerie(pk.dir) : null]);
-    polos = { esq: E && { key: pk.esq, serie: E }, dir: Dr && { key: pk.dir, serie: Dr } };
-    state.x = x; state.y = y;
-    if (LENTES[q.l]) state.lente = q.l;
-    setPar(x, X, y, Y);
+    await loadBR();
+    if (!window.maplibregl) await new Promise((r) => addEventListener('load', r, { once: true }));
     tooltip = new Tooltip($('tip'));
-    panel = new Panel($('panel'), { onSelect: (l, i) => ctl.select(l, i), onY: (k) => ctl.setY(k), polos });
     view = new MapView({
-      container: 'map', lite: touch, pixelRatio: pixelRatio(),
-      getPadding: () => {
-        if (mobile()) return mobilePadding();
-        const focus = document.body.classList.contains('focus');
-        return { top: 140, left: focus ? 40 : 330, right: focus ? 40 : 440, bottom: 60 };
+      container: 'map', pixelRatio: Math.min(2.5, (window.devicePixelRatio || 1) * UI.k), getPadding: padding,
+      onHover: (hit, pt) => {
+        if (!hit || !pt || touch) { tooltip.hide(); return; }
+        if (hit.level === 'uf' || hit.level === 'brmun') {
+          const p = (hit.level === 'uf' ? BR.states : BR.mun).features.find((f) => f.properties.id === hit.id)?.properties;
+          if (p) tooltip.showBR(p, hit.level, pt);
+          return;
+        }
+        tooltip.show(hit.level, hit.id, pt, { ...state.ctx, lente: state.lente });
       },
-      onHover: (hit, pt) => { if (!hit || !pt || touch) { tooltip.hide(); return; } tooltip.show(hit.level, hit.id, pt, { ...state.ctx, lente: state.lente }); },
-      onPick: (hit) => ctl.select(hit.level, hit.id, { fit: !(hit.level === 'local' || hit.level === 'secao') }),
+      onPick: (hit) => {
+        if (hit.level === 'uf') { const p = BR.states.features.find((f) => f.properties.id === hit.id)?.properties; if (p) ctl.entrar(p.uf); return; }
+        if (hit.level === 'brmun') { const p = BR.mun.features.find((f) => f.properties.id === hit.id)?.properties; if (p) ctl.entrar(p.uf, { sel: { level: 'municipio', id: p.id } }); return; }
+        ctl.select(hit.level, hit.id, { fit: !(hit.level === 'local' || hit.level === 'secao') });
+      },
       onEmpty: () => {
-        if (state.sel.level === 'estado') return;
+        if (state.modo !== 'uf' || state.sel.level === 'estado') return;
         const pais = parentChain(state.sel.level, state.sel.id);
         const pai = pais[pais.length - 1] || { level: 'estado', id: 0 };
         ctl.select(pai.level, pai.id);
       },
-      onView: (v) => {
-        const names = { macro: 'regiões', municipio: 'municípios', zona: 'zonas', bairro: 'bairros e municípios', local: 'locais de votação', secao: 'seções' };
-        $('level-hint').textContent = state.mode === 'auto' ? `Automático: ${names[v.poly] || ''}. Aproxime para detalhar.` : (LEVEL_INFO[state.mode]?.hint || '');
-        legenda();
-        enableLevels();
-        syncControls();
+      onView: () => legenda(),
+      onMoveEnd: () => {
+        // detalhe de locais e seções: municípios na tela, ao aproximar ou quando o nível pedido é local/seção
+        const fino = ['local', 'secao'].includes(view.view?.want) || ['local', 'secao'].includes(state.mode);
+        if (state.modo === 'uf' && (view.map.getZoom() >= 11 || fino) && !carregando) carregarPolys(view.municipiosVisiveis().slice(0, 12));
       },
     });
     await view.init();
-    for (const l of ['macro', 'municipio']) view.addPolyLevel(l);
-    renderPergunta();
-    setupSearch();
-    placeControls();
-    if (q.n && LEVEL_INFO[q.n] && !['local', 'secao'].includes(q.n)) { state.mode = q.n; view.mode = q.n; }
-    ctl.select('estado', 0, { fit: false });
-    if (q.c) { const [lng, lat, z] = q.c.split(',').map(Number); if ([lng, lat, z].every(Number.isFinite)) view.jump({ lng, lat, z }); }
+    await aplicarHash();
     $('loading').classList.add('done');
-    setTimeout(() => $('loading').remove(), 600);
-    view.map.on('moveend', writeHash);
-    view.map.on('zoomend', () => { if (view.map.getZoom() >= 10.8) ensurePolys().catch(() => {}); });
-    buildSearchIndex();
-    const idle = window.requestIdleCallback || ((f) => setTimeout(f, 50));
-    idle(() => loadLazy((name) => {
-      if (name === 'zona' || name === 'bairro') { view.addPolyLevel(name); buildSearchIndex(); }
-      enableLevels();
-      panel.render(state.sel.level, state.sel.id);
-      aplicarSelecaoDaUrl(q);
-    }).catch(fail));
-  } catch (err) { fail(err); }
+    setTimeout(() => $('loading')?.remove(), 500);
+    // depois do primeiro desenho: municípios do Brasil e índice nacional de candidatos
+    const idle = window.requestIdleCallback || ((f) => setTimeout(f, 200));
+    idle(() => {
+      loadBrMun().then(() => { view.addLevel('brmun'); if (state.modo === 'br') pintarBR(); }).catch(() => {});
+      loadCands().then((cs) => { sugestoes = cs.slice().sort((a, b) => b.votos - a.votos).filter((c) => c.cargo !== 1).slice(0, 8); if (state.modo === 'br') renderCards(); }).catch(() => {});
+    });
+  } catch (err) {
+    console.error(err);
+    $('loading-t').textContent = location.protocol === 'file:' ? 'Abra por um servidor web (python3 -m http.server --directory public).' : `Não foi possível carregar: ${err.message || err}`;
+  }
 }
 
-let selUrlFeita = false;
-function aplicarSelecaoDaUrl(q) {
-  if (selUrlFeita || !q.s) return;
-  const [level, idStr] = q.s.split(':');
-  const id = Number(idStr);
-  if ((D.lv[level]?.ready || level === 'local' || level === 'secao') && getProps(level, id)) { selUrlFeita = true; ctl.select(level, id, { fit: !q.c }); }
-}
-
-// ------------------------------------------------------------------ ferramentas e atalhos
-$('btn-focus').addEventListener('click', toggleFocus);
-$('btn-rail').addEventListener('click', () => (document.body.classList.contains('rail-open') ? closeRail() : openRail()));
-$('rail-close').addEventListener('click', closeRail);
-$('scrim').addEventListener('click', closeRail);
-$('rail').addEventListener('click', (e) => { if (mobile() && e.target.closest('.chipb')) closeRail(); });
-
-function toggleFocus() {
-  const on = document.body.classList.toggle('focus');
-  $('btn-focus').setAttribute('aria-pressed', String(on));
-  setTimeout(() => view?.resize(), 50);
-}
-
+// ------------------------------------------------------------------ topo, atalhos e redimensionamento
+$('brand').addEventListener('click', (e) => { e.preventDefault(); ctl.irBrasil(); });
+$('uf-pill').addEventListener('click', () => { if (state.modo === 'uf') ctl.irBrasil(); else abrirPicker('livre'); });
+$('search-btn').addEventListener('click', () => abrirPicker('livre'));
+$('btn-share').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(location.href); toast('Link copiado'); } catch { toast('Copie o endereço da barra do navegador'); }
+});
+addEventListener('hashchange', () => { if (!aplicandoHash) aplicarHash(); });
 addEventListener('keydown', (e) => {
-  if (e.target.closest('input, select, textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
-  if (pickerAberto()) { if (e.key === 'Escape') closePicker(); return; }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); abrirPicker('livre'); return; }
+  if (e.target.closest?.('input, textarea') || e.metaKey || e.ctrlKey || e.altKey || buscaAberta()) return;
   const k = e.key.toLowerCase();
-  const ids = Object.keys(LENTES);
-  if (/^[1-4]$/.test(k)) ctl.setLente(ids[Number(k) - 1]);
-  else if (k === 'x' || k === 'y') { e.preventDefault(); abrirPicker(k); }
+  if (k === '/') { e.preventDefault(); abrirPicker('livre'); return; }
+  if (state.modo !== 'uf') return;
+  if (k === 'x' || k === 'y') { e.preventDefault(); abrirPicker(k); }
   else if (k === 'i') ctl.trocar();
-  else if (k === 'f') toggleFocus();
-  else if (k === '/') { e.preventDefault(); $('search').focus(); }
-  else if (k === 'escape') { closeRail(); if (state.sel.level !== 'estado') ctl.select('estado', 0); }
+  else if (/^[1-5]$/.test(k)) ctl.setLente(['xt', 'bi', 'x', 'y', 'r'][Number(k) - 1]);
+  else if (k === 'f') { document.body.classList.toggle('focus'); setTimeout(() => view?.resize(), 30); }
+  else if (k === 'escape') { if (state.sel.level !== 'estado') ctl.select('estado', 0); else ctl.irBrasil(); }
 });
-
-addEventListener('resize', () => {
-  if (computeLayout()) placeControls();
-  view?.map?.setPixelRatio?.(pixelRatio());
-  view?.resize();
-  measureSheet();
-});
+addEventListener('resize', () => { computeLayout(); medir(); view?.resize(); });
+void LEVEL_INFO;
 boot();
