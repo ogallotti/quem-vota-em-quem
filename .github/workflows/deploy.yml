@@ -1,0 +1,32 @@
+name: Deploy (Cloudflare Pages)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # núcleo estatístico: não publica se a matemática quebrar
+      - name: Testes da estatística
+        run: node --test tests/
+      - name: Publicar public/ no Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          packageManager: npm # o runner não tem pnpm; o wrangler instala via npm
+          command: pages deploy public --project-name=quem-vota-em-quem --branch=main

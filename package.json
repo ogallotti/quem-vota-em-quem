@@ -1,0 +1,17 @@
+{
+  "name": "quem-vota-em-quem",
+  "private": true,
+  "type": "module",
+  "description": "Quem vota em X vota em Y? Mapa das eleições de 2026 seção por seção: correlação, afinidade, estimativa ecológica e teto certo de votos compartilhados. Site estático, zero build.",
+  "scripts": {
+    "coleta": ".venv/bin/python scripts/coleta_bu.py",
+    "build:data": ".venv/bin/python scripts/build_data.py",
+    "serve": "python3 -m http.server 4190 --directory public --bind 127.0.0.1",
+    "test": "node --test tests/",
+    "smoke": "node tests/smoke.mjs",
+    "test:mobile": "node tests/mobile.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.63.0"
+  }
+}

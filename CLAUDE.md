@@ -1,0 +1,31 @@
+# Quem vota em quem · Eleições 2026
+
+**O que é**: mapa interativo que responde "quem vota em X vota em Y?" cruzando, seção por seção, a votação de dois candidatos (qualquer cargo) ou de um candidato com a esquerda (Lula) ou a direita (Bolsonaro). Eleições gerais de 2026, hoje só o Maranhão (pipeline aceita qualquer UF). Site estático, zero build (HTML/CSS/JS puro + MapLibre GL vendorizado). Ver `README.md`.
+
+**STATUS**: teste (só lê dados públicos do TSE/IBGE; nenhuma mensagem a ninguém). Projeto geral, sem vínculo com campanha: não acrescentar dados de campanha nem nomes de clientes.
+
+**Onde roda / deploy**: Cloudflare Pages, pasta `public/`, **somente via CI** (`.github/workflows/deploy.yml`, wrangler, projeto `quem-vota-em-quem`). Secrets `CLOUDFLARE_API_TOKEN` e `CLOUDFLARE_ACCOUNT_ID` no GitHub. Site público (sem senha): só dados públicos.
+
+**Comandos**
+- Dev: `python3 -m http.server 4190 --directory public --bind 127.0.0.1` (neste ambiente, via Portly: `portly temp '...' --path <repo>`).
+- Dados: `.venv/bin/python scripts/coleta_bu.py --uf ma` (BUs, cache em `.cache/ma/bu`) → `.venv/bin/python scripts/build_data.py --uf ma` (saída em `public/data/ma/`, confere cada candidato com a divulgação oficial e aborta se divergir).
+- Teste: `pnpm test` (estatística, node --test), `pnpm smoke` e `pnpm test:mobile` (Playwright, Chromium real; precisam do servidor de pé em 4190).
+
+**Gotchas**
+- BU de 2026: a especificação ASN.1 de 2022 não decodifica (campos INTEGER a mais); `coleta_bu.py` lê o BER por posição/etiqueta. Um BU traz as duas eleições: federal 6257 (cargo 1) e estadual 6259 (cargos 3, 5, 6, 7; 8 no DF). Seções agregadas dão 404 no `aux.json` (votos na principal); a lista fica em `.cache/<uf>/sem_bu.txt` para não repetir pedidos. O TSE responde 429 por IP sob carga.
+- O BU identifica o local pelo número **original**: no cadastro de 2026 a chave é `NR_LOCAL_VOTACAO_ORIGINAL` (nome e coordenadas são do local onde a seção votou). O zip do cadastro traz um CSV por UF (`_MA.csv`) e um `_BRASIL.csv`; 2026 usa vírgula decimal nas coordenadas, 2022 usa ponto.
+- Comparecimento de presidente ≠ estadual em algumas seções (voto em trânsito só para presidente): `secoes.json` tem `cp` (estadual) e `cpf` (federal); `denomOf()` escolhe pelo cargo.
+- Candidatos com votos anulados (sub judice) entram com `valido = 0`; números que aparecem no BU sem registro oficial viram "Candidato N".
+- Mesma vaga = voto exclusivo (`exclusivos()` em `analise.js`): sem teto nem estimativa, a pergunta vira "disputam o mesmo território". **Senador tem dois votos em 2026**: dois senadores NÃO são exclusivos.
+- Estatística (`js/stats.js`, funções puras e testadas): correlação e regressão por **local de votação** (seções do mesmo local são quase sorteio: ruído puro); em recortes com menos de 12 locais, por seção. Teto/piso (Duncan–Davis) sempre por seção. A estimativa de Goodman é limitada ao intervalo certo. O veredito (`leitura()`) combina correlação e afinidade: em candidatos de voto concentrado a correlação fica baixa mesmo com territórios claramente sobrepostos ou separados.
+- Esquerda × direita = votos em Lula (PT) e Flávio Bolsonaro (PL) para presidente (`POLOS` em `build_data.py`, achados pelo partido). Decisão do usuário (05/10/2026): alinhamento Lula × Bolsonaro, não classificação de partidos (Valor = autodeclaração; seuimposto.com = survey acadêmico).
+- Pintura do mapa por **feature-state** `k` (classe calculada em JS para o par X/Y e o recorte): `MapView.setPaint({palette, none, k, label, clamp})`. `k = −2` = dentro do foco mas fora do recorte (quase o fundo); `−1` = sem dado. Polígonos usam `promoteId: 'id'`.
+- Bivariado: classes em relação à média do **recorte selecionado** (abaixo < 0,8×, acima > 1,25×). Paleta de Joshua Stevens em `scales.js`; X = ciano, Y = magenta em toda a interface (`COR`, `--x`, `--y`).
+- No modo Auto a seleção impõe o nível mínimo das suas subunidades (`MapView.setMinLevel`): região → municípios, município → bairros (cidades grandes) ou locais, local → seções. Sem isso, a seleção vira um bloco de uma cor.
+- Ordem das camadas: basemap < polígonos < véu `mask-fill` (apaga fora do foco) < rótulos < linhas e seleção. Polígonos entram com `beforeId: 'mask-fill'`.
+- MapLibre: expressões de zoom no topo de `interpolate`/`step`; fontes dentro de `format` com `['literal', [...]]`. Em aba oculta o estilo nunca carrega (usa `requestAnimationFrame`): teste visual no Chromium do Playwright.
+- Celular: layout escolhido em `computeLayout()` pelo aparelho, não por media query (hosts que desenham a página com ~1.100 px e reduzem). CSS de celular pelas classes `html.m`/`html.ml`. Topo: busca + Camadas e a pergunta (`#mq`); embaixo: legenda e gaveta peek/half/full.
+- Texto vindo dos dados entra sempre via `textContent` (helper `h()` em `js/fmt.js`), nunca `innerHTML`.
+- Chamadas a serviços externos nunca saem do navegador. O site só lê arquivos estáticos e tiles do mapa-base.
+- `window.__ctl`, `window.__state` e `window.__map` ficam expostos de propósito (depuração e testes).
+- BUs no cache: ~250 MB por UF média. `.cache/` é gitignored; `public/data/` é versionado (é o que vai ao ar).

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Quem vota em quem · Eleições 2026</title>
+  <meta name="description" content="Quem vota em um candidato também vota em outro? Mapa das eleições de 2026, seção por seção: correlação, afinidade, estimativa e o teto certo de votos compartilhados entre dois candidatos, ou entre um candidato e a esquerda (Lula) ou a direita (Bolsonaro).">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0d0d0d">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231a1a19'/%3E%3Ccircle cx='13' cy='16' r='7' fill='%234fbcbc' fill-opacity='.9'/%3E%3Ccircle cx='19' cy='16' r='7' fill='%23d77fc2' fill-opacity='.8'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="vendor/maplibre-gl.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <!-- #app: quando o host desenha a página larga e a reduz (celular), main.js monta o app na largura real e o amplia -->
+  <div id="app">
+    <div id="map" aria-label="Mapa"></div>
+
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true"><svg viewBox="0 0 32 32"><circle cx="12.5" cy="16" r="7.5" fill="#4fbcbc" fill-opacity=".9"/><circle cx="19.5" cy="16" r="7.5" fill="#d77fc2" fill-opacity=".8"/></svg></div>
+        <div class="brand-txt">
+          <div class="brand-t">Quem vota em quem</div>
+          <div class="brand-s" id="brand-s">Eleições 2026</div>
+        </div>
+      </div>
+      <div id="q-home"><div class="q" id="q" aria-label="Pergunta: quem vota em X vota em Y?"></div></div>
+      <nav class="tools" aria-label="Ferramentas">
+        <button class="btn only-m" id="btn-rail" type="button" aria-controls="rail" aria-expanded="false">Camadas</button>
+        <button class="btn only-d" id="btn-focus" type="button" title="Só o mapa (F)" aria-pressed="false">⤢</button>
+      </nav>
+    </header>
+
+    <!-- celular: main.js move para cá a busca e o botão Camadas, a pergunta e a legenda -->
+    <div class="mtop" id="mtop"><div id="mtop-search"></div><div id="mtop-btn"></div></div>
+    <div class="mq" id="mq"></div>
+    <div class="mbottom" id="mbottom"><div id="mbottom-legend"></div></div>
+
+    <nav class="crumbs glass" id="crumbs" aria-label="Navegação hierárquica"></nav>
+
+    <div class="scrim" id="scrim" hidden></div>
+    <aside class="rail glass" id="rail" aria-label="Controles do mapa">
+      <div class="rail-head only-m"><b>Camadas</b><button class="ghost" id="rail-close" type="button">Fechar</button></div>
+      <div class="search" id="search-box">
+        <input id="search" type="search" placeholder="Buscar cidade, bairro, escola…" autocomplete="off" spellcheck="false" aria-label="Buscar lugar" aria-controls="results" aria-expanded="false">
+        <ul id="results" class="results" role="listbox" hidden></ul>
+      </div>
+      <section>
+        <h4>O que pintar</h4>
+        <div class="chips lens-chips" id="lenses" role="radiogroup" aria-label="Lente do mapa"></div>
+        <div class="hint" id="lens-desc"></div>
+      </section>
+      <section>
+        <h4>Nível de detalhe</h4>
+        <div class="chips" id="levels" role="radiogroup" aria-label="Nível de detalhe"></div>
+        <div class="hint" id="level-hint"></div>
+      </section>
+      <section>
+        <h4>Ir para</h4>
+        <div class="goto"><button type="button" class="chipb" data-go="estado">Estado inteiro</button></div>
+      </section>
+      <footer class="keys only-d">
+        <b>X</b> <b>Y</b> escolher · <b>I</b> inverter · <b>1–4</b> lente · <b>F</b> só mapa · <b>/</b> buscar · <b>Esc</b> estado
+      </footer>
+    </aside>
+
+    <section class="legend glass" id="legend" aria-label="Legenda" hidden></section>
+    <aside class="panel glass" id="panel-wrap" data-snap="peek">
+      <button class="sheet-handle only-m" id="sheet-handle" type="button" aria-label="Expandir ou recolher a resposta"></button>
+      <div class="panel-scroll" id="panel" aria-label="Resposta para a seleção" aria-live="polite"></div>
+    </aside>
+    <div class="tip" id="tip" hidden role="tooltip"></div>
+
+    <div class="loading" id="loading" role="status">
+      <div class="spin" aria-hidden="true"></div>
+      <div id="loading-t">Carregando o mapa…</div>
+      <div class="loading-s" id="loading-s"></div>
+    </div>
+  </div>
+
+  <script src="vendor/maplibre-gl.js"></script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
