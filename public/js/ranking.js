@@ -1,6 +1,9 @@
-// "Em comum": para cada candidato X de um cargo, a fração estimada dos eleitores de X que também votaram em Y, nas duas
-// hipóteses (regressão e vizinhança), e os votos que isso representa, no recorte. Eleitorado em comum, não transferência. Mesma estatística do painel (Goodman por seção preso, urna a urna, aos
-// limites certos), em tempo real: cada X percorre só as seções onde teve voto, então São Paulo inteiro sai em segundos.
+// Aba "Em comum", nos dois sentidos, no recorte:
+//   quemVotouEm(Y): para cada candidato C de um cargo, a fração estimada dos eleitores de C que também votou em Y;
+//   eleitoresDe(X): para cada candidato C de um cargo, a fração estimada dos eleitores de X que votou em C.
+// Sempre nas duas hipóteses (regressão de Goodman e vizinhança), presas urna a urna aos limites certos: a mesma
+// estatística do painel, em tempo real (cada série percorre só as seções onde teve voto). Eleitorado em comum, não
+// transferência.
 import { D, cargoOf, denomOf, loadCargo, secsOf } from './data.js';
 
 const cache = new Map();
@@ -8,7 +11,7 @@ const cache = new Map();
 /**
  * @returns Promise<{lista: [{key, tx, est, comum, demais, r, lift}], minimo}> ordenada pela fração estimada.
  */
-export function quemTrouxe(yKey, Y, cargo, level, id) {
+export function quemVotouEm(yKey, Y, cargo, level, id) {
   const k = `${yKey}|${cargo}|${level}:${id}`;
   if (cache.has(k)) return cache.get(k);
   const p = loadCargo(cargo).then((series) => calcula(yKey, Y, cargo, series, secsOf(level, id)));
@@ -64,4 +67,61 @@ function calcula(yKey, Y, cargo, series, secs) {
   }
   lista.sort((p, q) => q.est - p.est);
   return { lista, minimo };
+}
+
+/**
+ * Em quem votaram os eleitores de X, entre os candidatos de um cargo.
+ * @returns Promise<{lista: [{key, ty, est, viz, demais: [g, v]}], tx, minimo}> ordenada pelo meio da faixa.
+ */
+export function eleitoresDe(xKey, X, cargo, level, id) {
+  const k = `de|${xKey}|${cargo}|${level}:${id}`;
+  if (cache.has(k)) return cache.get(k);
+  const p = loadCargo(cargo).then((series) => calculaDe(xKey, X, cargo, series, secsOf(level, id)));
+  cache.set(k, p);
+  p.catch(() => cache.delete(k));
+  return p;
+}
+
+function calculaDe(xKey, X, cargo, series, secs) {
+  const DXa = denomOf(xKey), DYa = denomOf(`${cargo}:0`);
+  const no = new Uint8Array(D.n);
+  // x = participação de X; pesos = comparecimento da eleição de X
+  let W = 0, tx = 0, Sxx = 0, TN = 0;
+  for (const s of secs) {
+    if (!(DXa[s] > 0 && DYa[s] > 0)) continue;
+    no[s] = 1;
+    W += DXa[s]; tx += X[s]; Sxx += (X[s] * X[s]) / DXa[s]; TN += Math.max(DXa[s], DYa[s]);
+  }
+  const minimo = Math.max(300, Math.round(W * 0.0015));
+  const det = W * Sxx - tx * tx, lista = [];
+  if (!(tx > 0) || !(det > 0)) return { lista, tx, minimo };
+  for (const [key, sp] of series) {
+    if (key === xKey || cargoOf(key) !== cargo) continue;
+    let ty = 0, Sy = 0, Sxy = 0;
+    for (let j = 0; j < sp.s.length; j++) {
+      const s = sp.s[j];
+      if (!no[s]) continue;
+      const yv = sp.v[j] / DYa[s];
+      ty += sp.v[j]; Sy += DXa[s] * yv; Sxy += X[s] * yv;
+    }
+    if (!(ty > 0)) continue;
+    const b = (W * Sxy - tx * Sy) / det, a = (Sy - b * tx) / W, beta = a + b;
+    // seções sem voto em C não entram: lá o teto é zero
+    let comum = 0, comumV = 0;
+    for (let j = 0; j < sp.s.length; j++) {
+      const s = sp.s[j], Xs = X[s];
+      if (!no[s] || !(Xs > 0)) continue;
+      const Ys = sp.v[j], N = Math.max(DXa[s], DYa[s]);
+      const lo = Math.max(0, Xs + Ys - N) / Xs, hi = Math.min(Xs, Ys) / Xs;
+      comum += Math.min(hi, Math.max(lo, beta)) * Xs;
+      comumV += Math.min(hi, Math.max(lo, Ys / DYa[s])) * Xs;
+    }
+    const resto = TN - tx;
+    lista.push({
+      key, ty, est: comum / tx, viz: comumV / tx,
+      demais: resto > 0 ? [Math.max(0, (ty - comum) / resto), Math.max(0, (ty - comumV) / resto)] : null,
+    });
+  }
+  lista.sort((p, q) => q.est + q.viz - p.est - p.viz);
+  return { lista, tx, minimo };
 }

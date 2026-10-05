@@ -212,7 +212,14 @@ details.more[open] summary::after { content: "−"; }
 .more-btn:hover { color: var(--ink); }
 .uf-row .row-n b { font-weight: 500; }
 .row.rk { grid-template-columns: 16px auto minmax(0, 1fr) auto; }
+.meter.rng { position: relative; overflow: visible; width: 64px; }
 .meter.rng i { border-radius: 2px; }
+.meter .tick { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--ink-2); opacity: .7; }
+.seg-full { display: flex; width: 100%; margin-bottom: 12px; }
+.seg-full { border-radius: 14px; }
+.seg-full button { flex: 1; min-width: 0; white-space: normal; line-height: 1.25; border-radius: 11px; padding: 6px 8px; }
+.row-v b.larga { color: var(--muted); font-weight: 400; text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
+.ord-nota { margin: 6px 0 10px; }
 .rk-i { font-size: 11px; color: var(--muted); text-align: right; }
 .split { display: flex; width: 70px; height: 5px; border-radius: 3px; overflow: hidden; margin-top: 4px; }
 .split i:first-child { background: var(--esq); }

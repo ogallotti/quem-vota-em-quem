@@ -15,7 +15,6 @@ Saídas (public/data/<uf>/), geometria quantizada ("qgeom": polígonos → anéi
     nomes.json           nome, endereço e bairro de cada local (sob demanda)
     m/<ibge>.json        polígonos de locais e seções de um município (sob demanda, ao aproximar)
     v/<cargo>-<k>.json   votos por seção, esparsos, em pacotes de ~120 KB: {"<nº>": {"i": [saltos], "v": [votos]}}
-    af.json              para cada candidato, os que mais (e menos) andam junto com ele em cada cargo
 public/fotos/<uf>/<cargo>-<k>.webp  sprites 8×8 de fotos 64×64, por votos (presidente: public/fotos/br/, por build_br.py)
 .cache/<uf>/resumo.json             totais por município e geometria leve, para scripts/build_br.py
 
@@ -177,7 +176,6 @@ def reconstroi(uf, cache, chaves, cps, trip, nums, por_secao):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--uf", required=True)
-    ap.add_argument("--sem-afinidades", action="store_true")
     a = ap.parse_args()
     UF = a.uf.upper()
     uf = UF.lower()
@@ -412,59 +410,7 @@ def main():
                                                  for r in L.itertuples()]})
     log(f"  zb.json {tz / 1e6:.2f} MB ({len(zonas)} zonas, {len(bairros)} bairros); nomes.json {tn / 1e6:.2f} MB")
 
-    # ---- 7. afinidades: por local de votação, quem anda junto com quem (correlação e afinidade)
-    if not a.sem_afinidades:
-        log("afinidades")
-        nl = len(L)
-        P = sp.csr_matrix((np.ones(n), (det.li.values, np.arange(n))), shape=(nl, n))
-        ids, cols = [], []
-        for cg in cargos:
-            M, idx = mats[cg]
-            V = (P @ M).toarray().astype(np.float32)
-            for num, j in idx.items():
-                if V[:, j].sum() > 0:
-                    ids.append(f"{cg}:{num}")
-                    cols.append(V[:, j])
-        V = np.stack(cols, axis=1)
-        del cols
-        cargo_de = np.array([int(k.split(":")[0]) for k in ids])
-        C = np.bincount(det.li.values, weights=det.cp.values, minlength=nl).astype(np.float32)
-        Cf = np.bincount(det.li.values, weights=cpf.astype(float), minlength=nl).astype(np.float32)
-        ok = C > 0
-        V, C, Cf = V[ok], C[ok], Cf[ok]
-        D = np.where(cargo_de[None, :] == 1, Cf[:, None], C[:, None])  # denominador: comparecimento da eleição de cada série
-        S = V / np.maximum(D, 1)
-        del D
-        w = (C / C.sum()).astype(np.float32)
-        with np.errstate(all="ignore"):  # o BLAS do macOS emite avisos espúrios no matmul
-            Z = (S - w @ S) * np.sqrt(w)[:, None]
-            cov = Z.T @ Z
-            del Z
-            sd = np.sqrt(np.clip(np.diag(cov), 1e-30, None))
-            R = cov / np.outer(sd, sd)
-            tot = V.sum(0)
-            Dsum = np.where(cargo_de == 1, Cf.sum(), C.sum())
-            # afinidade de k para j: participação de k no local médio do eleitor de j ÷ participação de k no estado
-            A = (V.T @ S) / tot[:, None] / (tot / Dsum)[None, :]
-        # alvos sugeridos: só candidatos com votos ≥ max(50, 0,02% do comparecimento do cargo na UF)
-        corte = {c["cd"]: max(50, 0.0002 * c["cp"]) for c in meta_cargos}
-        alvo = np.array([tot[j] >= corte[cargo_de[j]] for j in range(len(ids))])
-        af = {}
-        for j, k_ in enumerate(ids):
-            por = {"n": int(round(tot[j]))}
-            for cg in cargos:
-                sel = np.flatnonzero((cargo_de == cg) & alvo & (np.arange(len(ids)) != j))
-                if not len(sel):
-                    continue
-                o = sel[np.argsort(-R[j, sel])]
-                pick = list(o[:8]) + [x for x in o[-3:] if x not in o[:8]]
-                por[str(cg)] = [[ids[x].split(":")[1], round(float(R[j, x]), 3), round(float(A[j, x]), 2)] for x in pick]
-            af[k_] = por
-        ta = grava_json(OUT / "af.json", af)
-        log(f"  af.json: {len(af)} candidatos, {ta / 1e6:.2f} MB")
-        del V, S, R, A, cov
-
-    # ---- 8. base.json e resumo para o nacional
+    # ---- 7. base.json e resumo para o nacional
     b = unary_union([geo_mun[i] for i in ibs]).bounds
     base = {
         "v": 2, "uf": UF, "uf_nome": nome_uf, "cod_ibge": cod_ibge, "eleicao": ELEICAO, "turno": 1,

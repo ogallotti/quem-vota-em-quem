@@ -79,7 +79,7 @@ export const D = {
   uf: null, base: null, meta: null, cargos: new Map(), cand: new Map(),
   sec: null, n: 0, loc: null, nl: 0,
   lv: Object.fromEntries(LEVELS.map((l) => [l, { fc: null, byId: new Map(), ready: false }])),
-  un: {}, secByLocal: null, munPolys: new Set(), af: null, nomes: null,
+  un: {}, secByLocal: null, munPolys: new Set(), nomes: null,
 };
 
 export const serieKey = (cargo, num) => `${cargo}:${num}`;
@@ -91,7 +91,7 @@ export const denomOf = (key) => (cargoOf(key) === 1 ? D.sec.cpf : D.sec.cp);
 export const fotoDe = (c) => (c && c.s >= 0 ? { url: `fotos/${c.cargo === 1 ? 'br' : c.uf}/${c.cargo}-${c.s}.webp`, p: c.p } : null);
 
 function resetUF() {
-  D.cargos = new Map(); D.cand = new Map(); D.munPolys = new Set(); D.af = null; D.nomes = null; D.un = {};
+  D.cargos = new Map(); D.cand = new Map(); D.munPolys = new Set(); D.nomes = null; D.un = {};
   for (const l of LEVELS) D.lv[l] = { fc: null, byId: new Map(), ready: false };
   series.clear(); scopeCache.clear(); bboxCache.clear();
 }
@@ -217,12 +217,6 @@ export function loadSerie(key) {
   return p;
 }
 
-export async function loadAf() {
-  if (D.af) return D.af;
-  const uf = D.uf, a = await getOnce(`data/${uf}/af.json`);
-  if (uf === D.uf) D.af = a;
-  return D.af;
-}
 
 // ---------------------------------------------------------------- entidades e recortes
 export function getProps(level, id) {

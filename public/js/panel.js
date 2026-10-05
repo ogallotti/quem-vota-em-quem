@@ -1,4 +1,4 @@
-// Cartões da interface: a pergunta e a resposta (esquerda), "anda junto / onde / pontos" (direita), a tela inicial do
+// Cartões da interface: a pergunta e a resposta (esquerda), "em comum / onde / pontos" (direita), a tela inicial do
 // Brasil, a legenda, a trilha e a dica do mapa. Texto dos dados entra sempre por textContent (h()).
 import { A, rPorUnidade, recorte, territorio, valorDe } from './analise.js';
 import { BR, D, LEVEL_INFO, candOf, cargoOf, childrenOf, entityName, getProps, parentChain } from './data.js';
@@ -263,71 +263,71 @@ export function renderMain(el, level, id, ctx) {
 
 // ------------------------------------------------------------------ cartão lateral (UF)
 export function renderSide(el, level, id, ctx) {
-  const tab = ctx.tab || 'trouxe';
+  const tab = ctx.tab || 'comum';
   const tabs = h('div', { class: 'tabs', role: 'tablist' });
-  for (const [k, t] of [['trouxe', 'Em comum'], ['junto', 'Anda junto'], ['onde', 'Onde'], ['pontos', 'Pontos']]) tabs.append(h('button', { type: 'button', role: 'tab', class: 'tab' + (k === tab ? ' on' : ''), 'aria-selected': String(k === tab), onclick: () => ctx.onTab(k) }, t));
+  for (const [k, t] of [['comum', 'Em comum'], ['onde', 'Onde'], ['pontos', 'Pontos']]) tabs.append(h('button', { type: 'button', role: 'tab', class: 'tab' + (k === tab ? ' on' : ''), 'aria-selected': String(k === tab), onclick: () => ctx.onTab(k) }, t));
   const b = h('div', { class: 'side-b' });
-  if (tab === 'trouxe') trouxe(b, ctx);
-  else if (tab === 'junto') junto(b, ctx);
+  if (tab === 'comum') emComum(b, ctx);
   else if (tab === 'onde') onde(b, level, id, ctx);
   else pontos(b, level, id, ctx);
   clear(el).append(tabs, b);
 }
 
-/** Ranking: para Y, os candidatos de um cargo cujos eleitores, estima-se, mais votaram em Y (faixa entre hipóteses). */
-function trouxe(b, ctx) {
-  const cy = candOf(A.y), Y = curto(cy.nome);
-  const cargos = [...D.cargos.keys()].filter((c) => c !== cy.cargo || c === 5);
-  b.append(h('div', { class: 'sec-t' }, h('b', null, `De quem mais saíram votos para ${Y}?`)));
+/**
+ * "Em comum", nos dois sentidos: em quem votaram os eleitores de X (por cargo) e os eleitores de quem votaram em Y.
+ * Faixa entre as duas hipóteses; o traço cinza é a taxa dos demais eleitores.
+ */
+function emComum(b, ctx) {
+  const cx = candOf(A.x), cy = candOf(A.y), X = curto(cx.nome), Y = curto(cy.nome);
+  const de = ctx.sentido === 'de';
+  const seg = h('div', { class: 'seg seg-full' });
+  for (const [k, t] of [['de', ['Eleitores de ', sp('x', X)]], ['para', ['Votos de ', sp('y', Y)]]])
+    seg.append(h('button', { type: 'button', class: k === ctx.sentido ? 'on' : '', onclick: () => ctx.onSentido(k) }, ...t));
+  b.append(seg);
+  b.append(h('div', { class: 'sec-t' }, h('b', null, de ? `Os eleitores de ${X} votaram em quem?` : `Os eleitores de quem votaram em ${Y}?`)));
+  const cargoFixo = de ? cx.cargo : cy.cargo;
   const chips = h('div', { class: 'chips' });
-  for (const c of cargos) chips.append(h('button', { type: 'button', class: 'chip' + (c === ctx.trouxeCargo ? ' on' : ''), onclick: () => ctx.onTrouxeCargo(c) }, cargoCurto(c)));
-  const ord = h('div', { class: 'chips' });
-  for (const [k, t] of [['est', '% dos eleitores'], ['votos', 'votos em comum']]) ord.append(h('button', { type: 'button', class: 'chip' + (k === ctx.trouxeOrd ? ' on' : ''), onclick: () => ctx.onTrouxeOrd(k) }, t));
-  b.append(chips, ord);
-  const res = ctx.trouxe();
+  for (const c of D.cargos.keys()) if (c !== cargoFixo || c === 5) chips.append(h('button', { type: 'button', class: 'chip' + (c === ctx.comumCargo ? ' on' : ''), onclick: () => ctx.onComumCargo(c) }, cargoCurto(c)));
+  b.append(chips);
+  // ordem só existe no sentido "votos de Y": lá a proporção e o número de eleitores contam histórias diferentes
+  const porN = !de && ctx.ordem === 'n';
+  if (!de) {
+    const ord = h('div', { class: 'seg' });
+    for (const [k, t] of [['pct', 'Proporção'], ['n', 'Número de eleitores']]) ord.append(h('button', { type: 'button', class: k === ctx.ordem ? 'on' : '', onclick: () => ctx.onOrdem(k) }, t));
+    b.append(ord, h('p', { class: 'side-note ord-nota' }, porN
+      ? `Quantas pessoas votaram nos dois: a proporção vezes os votos do candidato. Favorece quem teve muitos votos.`
+      : `Que parte dos eleitores de cada candidato também votou em ${Y}. Favorece eleitorados fiéis, mesmo pequenos.`));
+  }
+  const res = ctx.comum();
   if (!res || res.loading) { b.append(h('div', { class: 'side-note' }, 'Calculando todos os candidatos…'), h('div', { class: 'skel', style: { height: '260px' } })); return; }
-  const meio = (l) => (l.est + l.viz) / 2;
-  const lista = res.lista.slice().sort((p, q) => (ctx.trouxeOrd === 'votos' ? meio(q) * q.tx - meio(p) * p.tx : meio(q) - meio(p))).slice(0, 25);
+  // normaliza os dois sentidos: base = eleitores de quem a % se refere; demais = taxa dos outros eleitores
+  const linhas = res.lista.map((l) => (de
+    ? { key: l.key, lo: Math.min(l.est, l.viz), hi: Math.max(l.est, l.viz), base: res.tx, votos: l.ty, dem: l.demais }
+    : { key: l.key, lo: Math.min(l.est, l.viz), hi: Math.max(l.est, l.viz), base: l.tx, votos: l.tx, dem: l.demais != null ? [l.demais, l.demais] : null }));
+  const meio = (l) => (l.lo + l.hi) / 2;
+  const chave = (l) => (porN ? meio(l) * l.base : de ? meio(l) : l.lo);
+  const lista = linhas.filter((l) => l.hi >= 0.0005).sort((p, q) => chave(q) - chave(p)).slice(0, 25);
   if (!lista.length) { b.append(h('div', { class: 'side-note' }, 'Nenhum candidato com votos suficientes neste recorte.')); return; }
-  const max = Math.max(...lista.map((l) => (ctx.trouxeOrd === 'votos' ? Math.max(l.est, l.viz) * l.tx : Math.max(l.est, l.viz))));
-  const faixaTxt = (a, z) => (Math.abs(a - z) < 0.01 ? fP0(a) : `${fP0(Math.min(a, z))}–${fP0(Math.max(a, z))}`);
+  const max = Math.max(...lista.map((l) => (porN ? l.hi * l.base : Math.max(l.hi, l.dem ? Math.max(...l.dem) : 0)))) || 1;
+  const faixaTxt = (l) => (l.hi - l.lo < 0.01 ? `~${fP0(meio(l))}` : `${fP0(l.lo)}–${fP0(l.hi)}`);
+  const pessoas = (l) => `~${fCompacto(meio(l) * l.base)} eleitores`;
   lista.forEach((l, i) => {
     const c = candOf(l.key);
     if (!c) return;
-    const lo = Math.min(l.est, l.viz), hi = Math.max(l.est, l.viz), esc = ctx.trouxeOrd === 'votos' ? l.tx : 1;
-    b.append(h('button', { type: 'button', class: 'row rk' + (l.key === A.x ? ' on' : ''), onclick: () => ctx.onX(l.key), title: `Ver ${c.nome} × ${cy.nome}` },
+    const esc = porN ? l.base : 1, pc = (v) => `${Math.min(100, ((v * esc) / max) * 100)}%`;
+    const alvo = de ? A.y : A.x;
+    b.append(h('button', { type: 'button', class: 'row rk' + (l.key === alvo ? ' on' : ''), onclick: () => (de ? ctx.onY(l.key) : ctx.onX(l.key)), title: de ? `Comparar ${cx.nome} com ${c.nome}` : `Ver ${c.nome} × ${cy.nome}` },
       h('span', { class: 'rk-i tn' }, String(i + 1)), avatar(c, 34),
-      h('span', { class: 'row-n' }, h('b', null, c.nome), h('span', null, `${c.partido} ${c.n} · ${fInt(l.tx)} votos`)),
-      h('span', { class: 'row-v tn' }, h('b', null, ctx.trouxeOrd === 'votos' ? `~${fInt(meio(l) * l.tx)}` : faixaTxt(l.est, l.viz)),
-        h('span', { class: 'meter rng' }, h('i', { style: { marginLeft: `${(lo * esc / max) * 100}%`, width: `${Math.max(3, ((hi - lo) * esc / max) * 100)}%`, background: 'var(--x)' } })),
-        h('span', null, ctx.trouxeOrd === 'votos' ? faixaTxt(l.est, l.viz) : `~${fInt(meio(l) * l.tx)} votos`))));
+      h('span', { class: 'row-n' }, h('b', null, c.nome), h('span', null, `${c.partido} ${c.n} · ${fInt(l.votos)} votos`)),
+      h('span', { class: 'row-v tn' }, h('b', { class: !porN && l.hi - l.lo > 0.35 ? 'larga' : null, title: l.hi - l.lo > 0.35 ? 'Faixa larga: os dados não separam bem as duas hipóteses' : null }, porN ? pessoas(l) : faixaTxt(l)),
+        h('span', { class: 'meter rng' }, h('i', { style: { marginLeft: pc(l.lo), width: `max(3px, calc(${pc(l.hi)} - ${pc(l.lo)}))`, background: 'var(--x)' } }),
+          !porN && l.dem ? h('b', { class: 'tick', style: { left: pc((l.dem[0] + l.dem[1]) / 2) } }) : null),
+        h('span', null, porN ? faixaTxt(l) : pessoas(l)))));
   });
-  b.append(h('div', { class: 'side-note' }, `Estimativa: % dos eleitores de cada candidato que também votou em ${Y}, entre as duas hipóteses (vizinhança e regressão), urna por urna e presa aos limites certos. Mostra eleitorado em comum, não transferência nem apoio. Ficam de fora candidatos com menos de ${fInt(res.minimo)} votos no recorte.`));
-}
-
-function junto(b, ctx) {
-  const cx = candOf(A.x);
-  if (!D.af) { b.append(h('div', { class: 'skel', style: { height: '220px' } })); return; }
-  const af = D.af[A.x];
-  b.append(h('div', { class: 'sec-t' }, h('b', null, `Quem mais anda junto com ${curto(cx.nome)}`)));
-  if (!af) { b.append(h('div', { class: 'side-note' }, 'Sem dados de afinidade para este candidato.')); return; }
-  const cargos = Object.keys(af).filter((k) => k !== 'n').map(Number);
-  if (!ctx.afCargo || !cargos.includes(ctx.afCargo)) ctx.afCargo = cargos.includes(cargoOf(A.y)) && cargoOf(A.y) !== cargoOf(A.x) ? cargoOf(A.y) : cargos.find((c) => c !== cargoOf(A.x) && c !== 1) || cargos[0];
-  const chips = h('div', { class: 'chips' });
-  for (const c of cargos) chips.append(h('button', { type: 'button', class: 'chip' + (c === ctx.afCargo ? ' on' : ''), onclick: () => ctx.onAfCargo(c) }, cargoCurto(c)));
-  b.append(chips);
-  const lista = af[String(ctx.afCargo)] || [];
-  const pos = lista.filter((x) => x[1] > 0).slice(0, 8), neg = lista.filter((x) => x[1] < 0).slice(-3).reverse();
-  const linha = ([num, rr, lift]) => {
-    const key = `${ctx.afCargo}:${num}`, c = candOf(key);
-    if (!c) return null;
-    return h('button', { type: 'button', class: 'row' + (key === A.y ? ' on' : ''), onclick: () => ctx.onY(key), title: `Comparar com ${c.nome}` },
-      avatar(c, 34), h('span', { class: 'row-n' }, h('b', null, c.nome), h('span', null, `${c.partido} ${c.n}${situacao(c.sit) ? ' · ' + situacao(c.sit) : ''}`)),
-      h('span', { class: 'row-v tn' }, h('b', null, fR(rr)), h('span', { class: 'meter' }, h('i', { style: { width: `${Math.min(100, Math.abs(rr) * 100)}%`, background: rr >= 0 ? 'var(--up)' : 'var(--down)' } })), h('span', null, fX(lift))));
-  };
-  b.append(...pos.map(linha));
-  if (neg.length) b.append(h('div', { class: 'sec-t', style: { marginTop: '12px' } }, h('b', null, 'Mais distantes')), ...neg.map(linha));
-  b.append(h('div', { class: 'side-note' }, `Correlação no estado inteiro, por local de votação; embaixo, a afinidade.${af.n != null && af.n < 300 ? ' Poucos votos: leitura frágil.' : ''} Toque para comparar.`));
+  const fragil = de && res.tx < res.minimo ? ` ${X} tem poucos votos neste recorte (${fInt(res.tx)}): leitura frágil.` : '';
+  b.append(h('div', { class: 'side-note' }, de
+    ? `Estimativa: que parte dos eleitores de ${X} votou em cada candidato, entre as duas hipóteses (vizinhança e regressão), presa urna a urna aos limites certos. O traço cinza é a taxa entre os demais eleitores. Faixa larga = pouca informação. Eleitorado em comum, não transferência nem apoio.${fragil}`
+    : `Estimativa: que parte dos eleitores de cada candidato também votou em ${Y}, entre as duas hipóteses (vizinhança e regressão), presa urna a urna aos limites certos.${porN ? '' : ' Ordenados pelo piso da faixa; o traço cinza é a taxa entre os demais eleitores.'} Faixa larga = pouca informação. Eleitorado em comum, não transferência nem apoio. Ficam de fora candidatos com menos de ${fInt(res.minimo)} votos no recorte.`));
 }
 
 function onde(b, level, id, ctx) {

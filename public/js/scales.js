@@ -28,7 +28,7 @@ export const DIV = ['#c51b7d', '#de77ae', '#f1b6da', '#eceae4', '#b8e186', '#7fb
 export const R_CORTES = [-0.5, -0.3, -0.1, 0.1, 0.3, 0.5];
 export const R_TXT = ['−0,5 ou menos', '−0,5 a −0,3', '−0,3 a −0,1', 'nenhuma (±0,1)', '0,1 a 0,3', '0,3 a 0,5', '0,5 ou mais'];
 
-// Luz e cor: Y é a LUZ (escala de cinza, do apagado ao branco, por quintis do eleitorado) e X é a COR por cima
+// Votos dos dois (lente padrão): Y é a LUZ (escala de cinza, do apagado ao branco, por quintis do eleitorado) e X é a COR por cima
 // (azul, da ausência à saturação máxima). Azul claro e vivo = os dois fortes. Cores em OKLCH, para a luminosidade
 // ser percebida igual em todas as casas. Índice = faixa de Y (0–4) × 5 + faixa de X (0–4).
 function oklchLin(L, C, hDeg) {
@@ -55,11 +55,11 @@ function cromaMax(L, hDeg) {
 export const YX = YX_L.flatMap((L) => { const cm = cromaMax(L, YX_H); return YX_F.map((f) => oklch(L, f * cm, YX_H)); });
 
 export const LENTES = {
-  yx: { id: 'yx', label: 'Luz e cor', curto: 'Luz e cor', desc: 'Luz = onde Y tem voto (branco onde mais tem, apagado onde não tem). Cor = onde X tem voto (azul mais vivo onde X é mais forte). Azul claro e vivo: os dois fortes.' },
-  bi: { id: 'bi', label: 'Onde os dois são fortes', curto: 'X × Y', desc: 'Cada área comparada com a média do recorte: azul = só X acima da média, amarelo = só Y, verde = os dois. Muito verde e cinza, pouco azul e amarelo: os eleitorados coincidem.' },
+  yx: { id: 'yx', label: 'Votos dos dois', curto: 'Os dois', desc: 'Cada área mostra os dois candidatos ao mesmo tempo: quanto mais clara, mais votos de Y; quanto mais azul, mais votos de X. Azul-claro vivo = os dois fortes; escuro = nenhum dos dois.' },
+  bi: { id: 'bi', label: 'Acima da média', curto: 'Acima da média', desc: 'Cada área comparada com a média do recorte: azul = só X acima da média, amarelo = só Y, verde = os dois. Muito verde e cinza, pouco azul e amarelo: os eleitorados coincidem.' },
   x: { id: 'x', label: 'Votos de X', curto: 'X', desc: 'Participação de X: votos ÷ eleitores que compareceram.' },
   y: { id: 'y', label: 'Votos de Y', curto: 'Y', desc: 'Participação de Y: votos ÷ eleitores que compareceram.' },
-  r: { id: 'r', label: 'Correlação local', curto: 'r', clamp: { local: 'bairro', secao: 'bairro' }, desc: 'Dentro de cada área, X e Y sobem e descem juntos de um local de votação para outro? Verde = sim, rosa = ao contrário, cinza = sem relação. Mostra onde a dobradinha funciona.' },
+  r: { id: 'r', label: 'Correlação local', curto: 'r', clamp: { local: 'bairro', secao: 'bairro' }, desc: 'Dentro de cada área, X e Y sobem e descem juntos de um local de votação para outro? Verde = sim, rosa = ao contrário, cinza = sem relação. Mostra onde os votos andam juntos (coincidência, não causa).' },
 };
 
 /** Faixas de uma escala sequencial a partir dos cortes (quantis). */

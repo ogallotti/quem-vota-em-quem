@@ -1,11 +1,11 @@
 // Controlador: Brasil ↔ estado, par (X, Y), lente, recorte, carga sob demanda, endereço compartilhável, teclado e
 // gaveta do celular. Zero backend: só arquivos estáticos.
-import { A, distribuicao, porUnidade, rPorUnidade, recorte, setPar, unidadesNoRecorte, valorDe } from './analise.js';
-import { BR, D, LEVEL_INFO, candOf, focusGeometry, getProps, loadAf, loadBR, loadCands, loadMunPolys, loadNomes, loadSerie, loadUF, loadZB, munOf, parentChain } from './data.js';
+import { A, porUnidade, rPorUnidade, recorte, setPar, unidadesNoRecorte, valorDe } from './analise.js';
+import { BR, D, LEVEL_INFO, candOf, focusGeometry, getProps, loadBR, loadCands, loadMunPolys, loadNomes, loadSerie, loadUF, loadZB, munOf, parentChain } from './data.js';
 import { abrirBusca, buscaAberta, fecharBusca } from './busca.js';
 import { clear, h } from './fmt.js';
 import { MapView } from './map.js';
-import { quemTrouxe } from './ranking.js';
+import { eleitoresDe, quemVotouEm } from './ranking.js';
 import { Tooltip, classeBiv, renderCrumbs, renderLegend, renderMain, renderMainBR, renderSide, renderSideBR } from './panel.js';
 import { BIV, DIV, LENTES, NOVOTE, RAMP, SEM_DADO, YX, classeR, classeSeq, classesSeq } from './scales.js';
 import { faixa, quantis, quantisPonderados, terco } from './stats.js';
@@ -13,7 +13,7 @@ import { ICON } from './ui.js';
 
 const $ = (id) => document.getElementById(id);
 const CRUMBS = $('crumbs'); // mora dentro da barra do mapa (que é refeita a cada mudança)
-const state = { modo: 'br', uf: null, x: null, y: null, lente: 'yx', mode: 'auto', sel: { level: 'estado', id: 0 }, tab: 'trouxe', trouxeCargo: null, trouxeOrd: 'est', trouxeRes: null, afCargo: null, ondeOrd: 'x', mais: false };
+const state = { modo: 'br', uf: null, x: null, y: null, lente: 'yx', mode: 'auto', sel: { level: 'estado', id: 0 }, tab: 'comum', sentido: 'para', comumCargo: { de: null, para: null }, ordem: 'pct', comumRes: null, ondeOrd: 'x', mais: false };
 const touch = matchMedia('(pointer: coarse)').matches || (navigator.maxTouchPoints > 0 && matchMedia('(hover: none)').matches);
 let view, tooltip, polos = null, sugestoes = null;
 window.__state = state;
@@ -151,47 +151,53 @@ function legenda() {
 
 // ------------------------------------------------------------------ cartões
 const ctxSide = () => ({
-  tab: state.tab, afCargo: state.afCargo, ondeOrd: state.ondeOrd, mais: state.mais, polos,
+  tab: state.tab, ondeOrd: state.ondeOrd, mais: state.mais, polos,
   onTab: (t) => { state.tab = t; renderCards(); },
-  onAfCargo: (c) => { state.afCargo = c; renderCards(); },
   onOndeOrd: (o) => { state.ondeOrd = o; renderCards(); },
   onMais: () => { state.mais = true; renderCards(); },
   onY: (k) => ctl.setY(k), onSelect: (l, i) => ctl.select(l, i),
   onPick: (lado) => abrirPicker(lado), onSwap: () => ctl.trocar(),
-  trouxeCargo: cargoTrouxe(), trouxeOrd: state.trouxeOrd, trouxe: pedirTrouxe,
-  onTrouxeCargo: (c) => { state.trouxeCargo = c; renderCards(); },
-  onTrouxeOrd: (o) => { state.trouxeOrd = o; renderCards(); },
+  sentido: state.sentido, comumCargo: cargoComum(state.sentido), ordem: state.ordem, comum: pedirComum,
+  onSentido: (s) => { state.sentido = s; renderCards(); },
+  onComumCargo: (c) => { state.comumCargo[state.sentido] = c; renderCards(); },
+  onOrdem: (o) => { state.ordem = o; renderCards(); },
   onX: (k) => ctl.setX(k),
   distribuicao: pedirDistribuicao,
 });
-/** Divisão dos eleitores de X entre os candidatos do cargo de Y (assíncrona; redesenha quando terminar). */
+/** Cálculos assíncronos do painel: devolve {loading} e redesenha quando o resultado chega. */
+const pend = new Map();
+function assincrono(nome, k, f) {
+  const r = pend.get(nome);
+  if (r?.k === k) return r.res ?? { loading: true };
+  const item = { k, res: null };
+  pend.set(nome, item);
+  f().then((res) => { item.res = res; if (pend.get(nome) === item) renderCards(); }).catch(() => {});
+  return { loading: true };
+}
+/** Como os eleitores de X se dividiram entre os principais candidatos do cargo de Y (quadro do cartão principal). */
 function pedirDistribuicao() {
   const { level, id } = state.sel, cargo = candOf(state.y)?.cargo;
-  const k = `${A.ver}|${cargo}|${level}:${id}`;
-  if (state.distRes?.k === k) return state.distRes.res;
-  if (state.distPend !== k) {
-    state.distPend = k;
-    distribuicao(level, id, cargo).then((res) => { if (res && state.distPend === k) { state.distRes = { k, res }; renderCards(); } }).catch(() => {});
-  }
-  return { loading: true };
+  return assincrono('dist', `${A.ver}|${cargo}|${level}:${id}`, () => eleitoresDe(state.x, A.X, cargo, level, id).then(({ lista }) => {
+    const top = new Set((D.cargos.get(cargo)?.cands || []).filter((c) => c.key !== state.x).slice(0, 6).map((c) => c.key));
+    return lista.filter((l) => top.has(l.key)).map((l) => ({ key: l.key, modelos: [Math.min(l.est, l.viz), Math.max(l.est, l.viz)], demais: l.demais ? [Math.min(...l.demais), Math.max(...l.demais)] : [0, 0] }));
+  }));
 }
-/** Cargo do ranking: o escolhido ou o "par natural" de Y (estadual ↔ federal; majoritários → estadual). */
-function cargoTrouxe() {
-  const cy = candOf(state.y)?.cargo, tem = (c) => D.cargos.has(c);
-  if (state.trouxeCargo && tem(state.trouxeCargo) && (state.trouxeCargo !== cy || cy === 5)) return state.trouxeCargo;
-  const par = { 6: tem(7) ? 7 : 8, 7: 6, 8: 6, 3: tem(7) ? 7 : 8, 5: tem(7) ? 7 : 8, 1: tem(7) ? 7 : 8 }[cy];
-  return par && tem(par) ? par : [...D.cargos.keys()].find((c) => c !== cy);
+/** Par natural de um cargo (estadual ↔ federal; majoritários → estadual). */
+function parNatural(c) {
+  const tem = (k) => D.cargos.has(k);
+  return { 6: tem(7) ? 7 : 8, 7: 6, 8: 6, 3: tem(7) ? 7 : 8, 5: tem(7) ? 7 : 8, 1: tem(7) ? 7 : 8 }[c];
 }
-/** Ranking do recorte atual (assíncrono: devolve {loading} e redesenha quando terminar). */
-function pedirTrouxe() {
-  const cargo = cargoTrouxe(), { level, id } = state.sel;
-  const k = `${state.uf}|${state.y}|${cargo}|${level}:${id}`;
-  if (state.trouxeRes?.k === k) return state.trouxeRes.res;
-  if (state.trouxePend !== k) {
-    state.trouxePend = k;
-    quemTrouxe(state.y, A.Y, cargo, level, id).then((res) => { state.trouxeRes = { k, res }; if (state.trouxePend === k && state.tab === 'trouxe') renderCards(); }).catch(() => {});
-  }
-  return { loading: true };
+/** Cargo da aba "Em comum": o escolhido, ou o cargo do outro candidato, ou o par natural; nunca a vaga exclusiva. */
+function cargoComum(sentido) {
+  const fixo = candOf(sentido === 'de' ? state.x : state.y)?.cargo, outro = candOf(sentido === 'de' ? state.y : state.x)?.cargo;
+  const ok = (c) => c && D.cargos.has(c) && (c !== fixo || c === 5);
+  return [state.comumCargo[sentido], outro, parNatural(fixo)].find(ok) || [...D.cargos.keys()].find(ok);
+}
+function pedirComum() {
+  const s = state.sentido, cargo = cargoComum(s), { level, id } = state.sel;
+  return s === 'de'
+    ? assincrono('comum', `de|${A.ver}|${cargo}|${level}:${id}`, () => eleitoresDe(state.x, A.X, cargo, level, id))
+    : assincrono('comum', `para|${A.ver}|${cargo}|${level}:${id}`, () => quemVotouEm(state.y, A.Y, cargo, level, id));
 }
 function renderCards() {
   if (state.modo === 'br') {
@@ -202,7 +208,6 @@ function renderCards() {
   const c = ctxSide();
   renderMain($('main-card'), state.sel.level, state.sel.id, c);
   renderSide($('side-card'), state.sel.level, state.sel.id, c);
-  state.afCargo = c.afCargo;
 }
 
 const curtoNome = (k) => { const p = (candOf(k)?.nome || '').split(' '); return p.length > 2 ? `${p[0]} ${p[p.length - 1]}` : p.join(' '); };
@@ -213,7 +218,7 @@ function renderTop() {
   if (state.modo !== 'uf') { mb.hidden = true; clear(CRUMBS); return; }
   mb.hidden = false;
   const seg = h('div', { class: 'seg', role: 'radiogroup', 'aria-label': 'O que pintar' });
-  const nomes = { yx: 'Luz e cor', bi: 'Os dois', x: curtoNome(state.x), y: curtoNome(state.y), r: 'Correlação' };
+  const nomes = { yx: 'Os dois', bi: 'Acima da média', x: curtoNome(state.x), y: curtoNome(state.y), r: 'Correlação' };
   for (const id of ['yx', 'bi', 'x', 'y', 'r']) seg.append(h('button', { type: 'button', role: 'radio', 'aria-checked': String(state.lente === id), class: state.lente === id ? 'on' : '', title: LENTES[id].desc, onclick: () => ctl.setLente(id) }, nomes[id]));
   const niv = h('div', { class: 'seg', role: 'radiogroup', 'aria-label': 'Nível do mapa' });
   for (const [id, t] of [['auto', 'Auto'], ['municipio', 'Municípios'], ['bairro', 'Bairros'], ['local', 'Locais'], ['secao', 'Seções']]) niv.append(h('button', { type: 'button', role: 'radio', 'aria-checked': String(state.mode === id), class: state.mode === id ? 'on' : '', onclick: () => ctl.setMode(id) }, t));
@@ -242,7 +247,7 @@ const ctl = {
     y = y && candOf(y) && y !== x ? y : padraoY;
     const [X, Y] = await Promise.all([loadSerie(x), loadSerie(y)]);
     polos = { esq: pk.esq && { key: pk.esq }, dir: pk.dir && { key: pk.dir } }; // só para os atalhos do seletor
-    Object.assign(state, { modo: 'uf', x, y, afCargo: null, mais: false });
+    Object.assign(state, { modo: 'uf', x, y, mais: false });
     if (lente && LENTES[lente]) state.lente = lente;
     setPar(x, X, y, Y);
     view.setModo('uf');
@@ -253,7 +258,6 @@ const ctl = {
     else ctl.select('estado', 0, { fit: trocou || state.sel.level === 'br' });
     // camadas e listas em segundo plano
     loadZB().then(() => { if (state.uf === uf) { view.addLevel('zona'); view.addLevel('bairro'); pintar(); renderCards(); } }).catch(() => {});
-    loadAf().then(() => { if (state.uf === uf) renderCards(); }).catch(() => {});
     loadNomes().then(() => { if (state.uf === uf && state.modo === 'uf') renderCards(); }).catch(() => {});
   },
   irBrasil() {
@@ -267,7 +271,7 @@ const ctl = {
   async setPar(x, y) {
     if (!candOf(x) || !candOf(y) || x === y) return;
     const [X, Y] = await Promise.all([loadSerie(x), loadSerie(y)]);
-    state.x = x; state.y = y; state.afCargo = null;
+    state.x = x; state.y = y;
     setPar(x, X, y, Y);
     pintar(); renderTop(); renderCards(); writeHash();
   },
@@ -348,6 +352,7 @@ function escolherEstado(c) {
 function abrirPicker(modo) {
   abrirBusca({
     modo, polos: polos ? { esq: polos.esq?.key, dir: polos.dir?.key } : null,
+    sugerir: modo === 'y' ? (cg) => eleitoresDe(state.x, A.X, cg, state.sel.level, state.sel.id).then((r) => r.lista.slice(0, 5).map((l) => l.key)) : null,
     onCand: (c) => {
       if (modo === 'y') {
         if (c.uf !== state.uf && c.cargo !== 1) { toast('Para comparar, Y precisa ser do mesmo estado (ou candidato a presidente)'); return; }

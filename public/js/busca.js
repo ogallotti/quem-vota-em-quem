@@ -1,5 +1,5 @@
 // Busca única (paleta): escolher X ou Y, ou buscar candidato e lugar de qualquer ponto do site.
-//   sem texto: atalhos esquerda/direita (no Y), sugestões de quem anda junto com X e os mais votados do estado por cargo
+//   sem texto: atalhos esquerda/direita (no Y), em quem mais votaram os eleitores de X (estimativa) e os mais votados
 //   com texto: candidatos do estado atual, do Brasil inteiro (outros estados trocam de UF) e lugares do estado
 // Teclado: ↑ ↓ para andar, Enter escolhe, Esc fecha.
 import { A } from './analise.js';
@@ -23,7 +23,8 @@ export function fecharBusca() {
  *   onLugar  (level, id) → escolheu um lugar
  *   polos    { esq, dir } chaves dos polos (no Y)
  */
-export function abrirBusca({ modo = 'livre', onCand, onLugar, polos = null, texto = '' }) {
+export function abrirBusca({ modo = 'livre', onCand, onLugar, polos = null, sugerir = null, texto = '' }) {
+  const sugs = new Map(); // cargo → chaves sugeridas (null = calculando)
   fecharBusca();
   const foco = document.activeElement;
   let cargo = modo === 'y' && A.x ? sugereCargo() : null;
@@ -90,10 +91,14 @@ export function abrirBusca({ modo = 'livre', onCand, onLugar, polos = null, text
             h('button', { type: 'button', class: 'polo e', onclick: () => escolher({ t: 'cand', c: e }) }, avatar(e, 34), h('span', null, h('b', null, 'Esquerda'), h('span', null, `${e.nome} (${e.partido})`))),
             h('button', { type: 'button', class: 'polo d', onclick: () => escolher({ t: 'cand', c: d }) }, avatar(d, 34), h('span', null, h('b', null, 'Direita'), h('span', null, `${d.nome} (${d.partido})`)))));
         }
-        if (modo === 'y' && D.af?.[A.x]) {
-          const af = D.af[A.x], cg = cargo || sugereCargo();
-          const sug = (af[String(cg)] || []).filter((x) => x[1] > 0).slice(0, 5).map(([n]) => candOf(`${cg}:${n}`)).filter(Boolean);
-          if (sug.length) { grupo(`Andam junto com ${curto(candOf(A.x).nome)} · ${cargoCurto(cg).toLowerCase()}`); add(sug, linhaCand); }
+        if (modo === 'y' && sugerir) {
+          const cg = cargo || sugereCargo();
+          if (!sugs.has(cg)) {
+            sugs.set(cg, null);
+            sugerir(cg).then((ks) => { sugs.set(cg, ks); if (aberto && !input.value.trim()) draw(); }).catch(() => {});
+          }
+          const sug = (sugs.get(cg) || []).map(candOf).filter(Boolean);
+          if (sug.length) { grupo(`Mais votados pelos eleitores de ${curto(candOf(A.x).nome)} (estimativa) · ${cargoCurto(cg).toLowerCase()}`); add(sug, linhaCand); }
         }
         for (const c of D.cargos.values()) tabs.append(h('button', { type: 'button', class: 'chip' + (c.cd === (cargo || 0) ? ' on' : ''), onclick: () => { cargo = c.cd; draw(); input.focus(); } }, cargoCurto(c.cd)));
         const cg = cargo || [...D.cargos.keys()].find((k) => k === 3) || [...D.cargos.keys()][0];
