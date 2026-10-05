@@ -1,0 +1,55 @@
+name: Coleta de boletins de urna (TSE)
+
+# Baixa os boletins de urna de cada seção em fatias paralelas: cada job roda numa máquina com IP próprio, o que contorna
+# o limite de pedidos por IP do TSE. Cada job decodifica em memória e entrega só o resumo compacto (secoes.p<k>.jsonl.gz)
+# como artefato; o BU bruto é descartado. Depois: gh run download <id> e scripts/build_data.py --uf <uf>.
+on:
+  workflow_dispatch:
+    inputs:
+      ufs:
+        description: "UFs separadas por vírgula (vazio = todas)"
+        default: ""
+      tamanho:
+        description: "Seções por fatia"
+        default: "10000"
+
+permissions:
+  contents: read
+
+jobs:
+  fatias:
+    runs-on: ubuntu-latest
+    outputs:
+      matriz: ${{ steps.m.outputs.matriz }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: m
+        env:
+          UFS: ${{ inputs.ufs }}
+          TAMANHO: ${{ inputs.tamanho }}
+        run: echo "matriz=$(python3 scripts/fatias.py --ufs "$UFS" --tamanho "$TAMANHO")" >> "$GITHUB_OUTPUT"
+
+  coleta:
+    needs: fatias
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix: ${{ fromJSON(needs.fatias.outputs.matriz) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Boletins de ${{ matrix.uf }} (${{ matrix.parte }})
+        run: python3 scripts/coleta_bu.py --uf "${{ matrix.uf }}" --parte "${{ matrix.parte }}" --sem-cache --trabalhadores 10
+      - id: n
+        run: |
+          gzip -9 .cache/${{ matrix.uf }}/secoes.p*.jsonl
+          echo "nome=bu-${{ matrix.uf }}-$(echo '${{ matrix.parte }}' | sed 's|/|de|')" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.n.outputs.nome }}
+          path: |
+            .cache/${{ matrix.uf }}/secoes.p*.jsonl.gz
+            .cache/${{ matrix.uf }}/sem_bu.p*.txt
+            .cache/${{ matrix.uf }}/*-cs.json
+          retention-days: 14

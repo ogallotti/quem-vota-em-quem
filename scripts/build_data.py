@@ -295,7 +295,13 @@ def main():
     log(f"{nome_uf} · saída {OUT}")
 
     # ---- 1. seções (boletins de urna)
-    secs = [json.loads(l) for l in (cache / "secoes.jsonl").read_text().splitlines() if l.strip()]
+    # secoes.jsonl (coleta local) ou as fatias secoes.p<k>.jsonl[.gz] (coleta em paralelo no GitHub Actions)
+    arqs = sorted(cache.glob("secoes.p*.jsonl*")) or [cache / "secoes.jsonl"]
+    secs = []
+    for arq in arqs:
+        txt = gzip.decompress(arq.read_bytes()).decode() if arq.suffix == ".gz" else arq.read_text()
+        secs += [json.loads(l) for l in txt.splitlines() if l.strip()]
+    log(f"  {len(arqs)} arquivo(s) de seções")
     secs.sort(key=lambda r: (r["m"], r["z"], r["s"]))
     n = len(secs)
     cargos = sorted({int(c) for r in secs for c in r["c"]})
@@ -360,7 +366,7 @@ def main():
                                 cache / "mun_malha.json").read_text())
     mun_meta = json.loads(baixar(f"{IBGE}/v1/localidades/estados/{cod_ibge}/municipios", cache / "mun_meta.json").read_text())
     ib_por_chave = {chave(m["nome"]): m for m in mun_meta}
-    conf = json.loads(next(cache.glob(f"{uf}-p00*-cs.json")).read_text())
+    conf = json.loads(next(cache.glob(f"{uf}-p00*-cs.json")).read_text())  # vem junto com as fatias
     nome_tse = {int(m["cd"]): m["nm"] for m in conf["abr"][0]["mu"]}
     tse2ib = {}
     for cd in det.CD_MUNICIPIO.unique():

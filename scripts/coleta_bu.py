@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Coleta os boletins de urna (BU) de todas as seções de uma UF e extrai os votos de TODOS os cargos.
 
-Uso:   .venv/bin/python scripts/coleta_bu.py --uf ma [--trabalhadores 16] [--limite N]
-Saída: .cache/<uf>/secoes.jsonl, uma linha por seção:
+Uso:   .venv/bin/python scripts/coleta_bu.py --uf ma [--trabalhadores 16] [--parte 2/6] [--sem-cache] [--limite N]
+       --parte k/n   só a k-ésima de n fatias contíguas das seções (para rodar em paralelo, ex.: GitHub Actions)
+       --sem-cache   não guarda o BU bruto (~14 KB por seção): decodifica em memória e guarda só o resumo
+Saída: .cache/<uf>/secoes.jsonl (ou secoes.p<k>.jsonl com --parte), uma linha por seção:
     {"m": município TSE, "z": zona, "l": local, "s": seção, "ap": aptos,
      "c": {"<cargo>": {"cp": comparecimento, "nom": nominais, "leg": legenda, "br": brancos, "nu": nulos,
                        "v": {"<número>": votos nominais}, "lg": {"<partido>": votos de legenda}}}}
@@ -143,14 +145,13 @@ def decodifica(dados):
     return sec
 
 
-def processa(uf, m, z, s, cache, sem_bu):
+def processa(uf, m, z, s, cache, sem_bu, guarda=True):
     """Baixa (com cache) o aux e o BU de uma seção e devolve o registro decodificado (ou None se não há BU)."""
     chave = f"{m}/{z}/{s}"
     if chave in sem_bu:
         return None
     arq = cache / "bu" / m / z / f"{s}.dat"
-    if not arq.exists():
-        arq.parent.mkdir(parents=True, exist_ok=True)
+    if not guarda or not arq.exists():
         base = f"{BASE}/dados/{uf}/{m}/{z}/{s}"
         try:
             aux = json.loads(get(f"{base}/p00{PLEITO}-{uf}-m{m}-z{z}-s{s}-aux.json"))
@@ -163,7 +164,11 @@ def processa(uf, m, z, s, cache, sem_bu):
             raise RuntimeError(f"seção {chave} sem BU (situação {aux.get('st')})")
         h = hs[-1]  # o mais recente (seções com BU substituído trazem mais de um hash)
         nome = next(a["nm"] for a in h["arq"] if a["tp"] == "bu")
-        arq.write_bytes(get(f"{base}/{h['hash']}/{nome}"))
+        dados = get(f"{base}/{h['hash']}/{nome}")
+        if not guarda:
+            return decodifica(dados)
+        arq.parent.mkdir(parents=True, exist_ok=True)
+        arq.write_bytes(dados)
     return decodifica(arq.read_bytes())
 
 
@@ -172,6 +177,8 @@ def main():
     ap.add_argument("--uf", required=True)
     ap.add_argument("--limite", type=int, default=0)
     ap.add_argument("--trabalhadores", type=int, default=16)
+    ap.add_argument("--parte", default="")
+    ap.add_argument("--sem-cache", action="store_true")
     a = ap.parse_args()
     uf = a.uf.lower()
     cache = ROOT / ".cache" / uf
@@ -183,26 +190,40 @@ def main():
     lista = [(mu["cd"], z["cd"], sc["ns"]) for mu in conf["abr"][0]["mu"] for z in mu["zon"] for sc in z["sec"]]
     if a.limite:
         lista = lista[: a.limite]
-    arq_sem = cache / "sem_bu.txt"
+    sufixo = ""
+    if a.parte:
+        k, n = (int(x) for x in a.parte.split("/"))
+        lista = lista[(k - 1) * len(lista) // n: k * len(lista) // n]
+        sufixo = f".p{k}"
+    arq_sem = cache / f"sem_bu{sufixo}.txt"
     sem_bu = set(arq_sem.read_text().split()) if arq_sem.exists() else set()
     log(f"{uf.upper()}: {len(lista)} seções na configuração de {conf['dg']} {conf['hg']} ({len(sem_bu)} já sabidas sem BU)")
-    out, erros, t0 = [], [], time.time()
-    with ThreadPoolExecutor(a.trabalhadores) as ex:
-        fut = {ex.submit(processa, uf, *x, cache, sem_bu): x for x in lista}
-        for i, f in enumerate(as_completed(fut), 1):
-            try:
-                r = f.result()
-                if isinstance(r, str):
-                    sem_bu.add(r)
-                elif r is not None:
-                    out.append(r)
-            except Exception as e:  # noqa: BLE001
-                erros.append((fut[f], repr(e)[:160]))
-            if i % 2000 == 0:
-                log(f"  {i}/{len(lista)} em {time.time() - t0:.0f}s ({len(erros)} erros)")
+    out, t0 = [], time.time()
+    pendentes, erros = lista, []
+    for rodada in range(4):  # seções que falharam (429, rede) voltam para a fila, com pausa crescente
+        if rodada:
+            log(f"  rodada {rodada + 1}: {len(pendentes)} seções com erro; esperando {60 * rodada}s")
+            time.sleep(60 * rodada)
+        erros = []
+        with ThreadPoolExecutor(a.trabalhadores) as ex:
+            fut = {ex.submit(processa, uf, *x, cache, sem_bu, not a.sem_cache): x for x in pendentes}
+            for i, f in enumerate(as_completed(fut), 1):
+                try:
+                    r = f.result()
+                    if isinstance(r, str):
+                        sem_bu.add(r)
+                    elif r is not None:
+                        out.append(r)
+                except Exception as e:  # noqa: BLE001
+                    erros.append((fut[f], repr(e)[:160]))
+                if i % 2000 == 0:
+                    log(f"  {i}/{len(pendentes)} em {time.time() - t0:.0f}s ({len(erros)} erros)")
+        if not erros:
+            break
+        pendentes = [e[0] for e in erros]
     arq_sem.write_text("\n".join(sorted(sem_bu)) + "\n")
     out.sort(key=lambda r: (r["m"], r["z"], r["s"]))
-    with open(cache / "secoes.jsonl", "w") as f:
+    with open(cache / f"secoes{sufixo}.jsonl", "w") as f:
         for r in out:
             f.write(json.dumps(r, separators=(",", ":")) + "\n")
     cargos = sorted({c for r in out for c in r["c"]}, key=int)

@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  testes:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,8 +21,15 @@ jobs:
         with:
           node-version: 22
       # núcleo estatístico: não publica se a matemática quebrar
-      - name: Testes da estatística
-        run: node --test tests/
+      - run: node --test tests/
+
+  deploy:
+    needs: testes
+    # só publica depois que o projeto Pages e os secrets existirem (variável do repositório PAGES_ATIVO = true)
+    if: ${{ vars.PAGES_ATIVO == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - name: Publicar public/ no Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
