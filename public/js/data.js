@@ -367,3 +367,26 @@ export function searchPlaces(q, limit = 8) {
   hits.sort((a, b) => a.sc - b.sc || b.ap - a.ap);
   return hits.slice(0, limit);
 }
+
+/** Votos esparsos de TODOS os candidatos de um cargo (para o ranking): chave → {s: seções, v: votos}. */
+const cargoCache = new Map();
+export function loadCargo(cargo) {
+  const k = `${D.uf}:${cargo}`;
+  if (cargoCache.has(k)) return cargoCache.get(k);
+  const cands = D.cargos.get(cargo)?.cands || [];
+  const chunks = [...new Set(cands.map((c) => c.chunk))];
+  const uf = D.uf;
+  const p = Promise.all(chunks.map((ch) => getOnce(`data/${uf}/v/${cargo}-${ch}.json`))).then((pks) => {
+    const out = new Map();
+    for (const pk of pks) for (const [num, sp] of Object.entries(pk)) {
+      const s = new Int32Array(sp.i.length);
+      let acc = -1;
+      for (let j = 0; j < sp.i.length; j++) { acc += sp.i[j]; s[j] = acc; }
+      out.set(`${cargo}:${num}`, { s, v: sp.v });
+    }
+    return out;
+  });
+  cargoCache.set(k, p);
+  p.catch(() => cargoCache.delete(k));
+  return p;
+}

@@ -55,34 +55,31 @@ function estado() {
   });
 }
 
-const MIN_LOCAIS = 12;
-/** Unidade de análise de um recorte: locais de votação; em recortes pequenos, as seções. */
-function grupoDe(level, id) {
-  if (level === 'local' || level === 'secao') return 'secao';
-  if (level === 'estado') return 'local';
+/**
+ * Unidade de análise: a SEÇÃO (urna), a base de tudo. Blocos (correlação "dentro" e bootstrap): municípios quando o
+ * recorte tem vários; num município só, os locais de votação (seções do mesmo prédio ficam no mesmo bloco).
+ */
+function blocosDoRecorte(level, id) {
   const set = new Set();
-  for (const s of secsOf(level, id)) set.add(D.sec.li[s]);
-  return set.size >= MIN_LOCAIS ? 'local' : 'secao';
+  for (const s of secsOf(level, id)) set.add(D.loc.mi[D.sec.li[s]]);
+  return set.size >= 2 ? 'municipio' : 'local';
 }
-
-/** Bloco de cada unidade (correlação dentro dos blocos e bootstrap): local → município; seção → local. */
-function blocosDe(unidade) {
-  const u = D.un[unidade];
-  return Int32Array.from(u.ids, (id) => (unidade === 'local' ? D.loc.mi[id] : D.sec.li[id]));
+function blocosDe(tipo) {
+  return Int32Array.from({ length: D.n }, (_, s) => (tipo === 'municipio' ? D.loc.mi[D.sec.li[s]] : D.sec.li[s]));
 }
 
 /** Análise completa de um recorte (seleção), com intervalos por bootstrap. */
 export function recorte(level, id, { B = 200 } = {}) {
   if (!A.X) return null;
   return memo(`r:${level}:${id}:${B}`, () => {
-    const unidade = grupoDe(level, id);
-    const u = D.un[unidade];
+    const u = D.un.secao, tipo = blocosDoRecorte(level, id);
+    const secs = secsOf(level, id);
     const out = analisa({
-      secs: secsOf(level, id), grupo: u.idx, nG: u.ids.length, cluster: memo(`bl:${unidade}`, () => blocosDe(unidade)),
-      X: A.X, Y: A.Y, DX: A.DX, DY: A.DY, exclusivos: exclusivos(), B,
+      secs, grupo: u.idx, nG: u.ids.length, cluster: memo(`bl:${tipo}`, () => blocosDe(tipo)),
+      X: A.X, Y: A.Y, DX: A.DX, DY: A.DY, exclusivos: exclusivos(), B: secs.length > 30000 ? Math.min(B, 80) : B,
     });
-    out.unidade = unidade;
-    out.blocos = unidade === 'local' ? 'municípios' : 'locais';
+    out.unidade = 'secao';
+    out.blocos = tipo === 'municipio' ? 'municípios' : 'locais';
     out.ids = out.gi.map((g) => u.ids[g]);
     return out;
   });
@@ -154,13 +151,13 @@ export function unidadesNoRecorte(level, sLevel, sId) {
 export const nomeRecorte = (level, id) => (level === 'estado' ? D.meta.uf_nome : getProps(level, id)?.n || '');
 
 /**
- * Território de X no recorte: os locais de votação onde X vai melhor (proporção encolhida), somando 20% do eleitorado
+ * Território de X no recorte: as seções onde X vai melhor (proporção encolhida), somando 20% do eleitorado
  * do recorte. Quanto dos votos de X e de Y saiu dali. Sem relação entre os dois, o território daria a Y ~20% dos votos.
  */
 export function territorio(level, id, fatia = 0.2) {
   return memo(`tt:${level}:${id}`, () => {
     const r = recorte(level, id);
-    const u = D.un.local, nL = u.ids.length, secs = secsOf(level, id);
+    const u = D.un.secao, nL = u.ids.length, secs = secsOf(level, id); // seções (a base de tudo)
     const gx = new Float64Array(nL), gy = new Float64Array(nL), gd = new Float64Array(nL);
     for (const s of secs) { const g = u.idx[s]; gx[g] += A.X[s]; gy[g] += A.Y[s]; gd[g] += A.DX[s]; }
     const gs = [];
@@ -175,3 +172,4 @@ export function territorio(level, id, fatia = 0.2) {
     return { n, eleitores: el > 0 ? elT / el : 0, votosX: vx > 0 ? vxT / vx : 0, votosY: vy > 0 ? vyT / vy : 0 };
   });
 }
+

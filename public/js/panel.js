@@ -3,7 +3,7 @@
 import { A, lado, rPorUnidade, recorte, territorio, valorDe } from './analise.js';
 import { BR, D, LEVEL_INFO, candOf, cargoOf, childrenOf, entityName, getProps, parentChain } from './data.js';
 import { clear, fInt, fPct, h } from './fmt.js';
-import { BIV, BIV_TXT, BOLHA, BOLHA_TXT, DIV, LADO, SEM_DADO, XT, YX } from './scales.js';
+import { BIV, BIV_TXT, DIV, LADO, SEM_DADO, YX } from './scales.js';
 import { leitura, terco } from './stats.js';
 import { ICON, avatar, cargoCurto, chipCand, curto, situacao } from './ui.js';
 
@@ -73,7 +73,7 @@ export class Tooltip {
 }
 
 // ------------------------------------------------------------------ legenda
-export function renderLegend(el, { lente, classes, escopo, bolhaMax }) {
+export function renderLegend(el, { lente, classes, escopo }) {
   clear(el);
   el.hidden = false;
   if (lente === 'br') {
@@ -95,34 +95,6 @@ export function renderLegend(el, { lente, classes, escopo, bolhaMax }) {
         h('div', null, h('i', { style: { background: YX[4] } }), h('span', null, `só ${X}`)),
         h('div', null, h('i', { style: { background: YX[0] } }), h('span', null, 'nenhum dos dois')))),
       h('div', { class: 'lg-ends', style: { width: 'auto', marginTop: '6px' } }, `luz = ${Y} · cor = ${X} · faixas de 20% do eleitorado ${escopo}`));
-    return;
-  }
-  if (lente === 'bo') {
-    const X = curto(nomeCand(A.x)), Y = curto(nomeCand(A.y));
-    const tam = h('div', { class: 'bo-tam' });
-    if (bolhaMax) for (const f of [1, 0.25, 0.04]) {
-      const d = 2 * Math.max(1.6, bolhaMax.rmax * Math.sqrt(f));
-      tam.append(h('span', null, h('i', { style: { width: `${d}px`, height: `${d}px` } }), fInt(bolhaMax.votos * f)));
-    }
-    el.append(h('div', { class: 'lg-t' }, 'Bolha = votos de ', h('b', { style: { color: 'var(--x)' } }, X), ' · cor = como ', h('b', { style: { color: 'var(--y)' } }, Y), ' foi ali'),
-      tam,
-      h('div', { class: 'lg-ramp' }, ...BOLHA.map((c, i) => h('i', { style: { background: c }, title: `${Y} ${BOLHA_TXT[i]}` }))),
-      h('div', { class: 'lg-ends' }, h('span', null, `${Y} fraco: ${X} sozinho`), h('span', null, 'juntos')));
-    return;
-  }
-  if (lente === 'xt') {
-    const X = curto(nomeCand(A.x)), Y = curto(nomeCand(A.y));
-    const g = h('div', { class: 'xt-g', role: 'img', 'aria-label': `Legenda: brilho = força de ${X}, cor = força de ${Y}` });
-    for (let fx = 4; fx >= 0; fx--) for (let iy = 0; iy < 3; iy++) g.append(h('i', { style: { background: XT[fx * 3 + iy] } }));
-    el.append(h('div', { class: 'lg-t' }, 'Brilho = onde ', h('b', { style: { color: 'var(--x)' } }, X), ' é forte · cor = ', h('b', { style: { color: 'var(--y)' } }, Y)),
-      h('div', { class: 'xt-wrap' },
-        h('div', { class: 'xt-y' }, h('span', null, `${X} mais forte`), h('span', null, `${X} fraco`)),
-        g,
-        h('div', { class: 'xt-k' },
-          h('span', null, h('i', { style: { background: XT[14] } }), `os dois fortes`),
-          h('span', null, h('i', { style: { background: XT[12] } }), `${X} forte, ${Y} fraco`),
-          h('span', null, h('i', { style: { background: XT[1] } }), `${X} fraco (apagado)`))),
-      h('div', { class: 'lg-ends', style: { width: 'auto', marginTop: '6px' } }, `colunas: ${Y} abaixo da média ${escopo}, na média, acima`));
     return;
   }
   if (lente === 'bi') {
@@ -238,7 +210,7 @@ export function renderMain(el, level, id, ctx) {
   }
   const cR = (x) => (x == null ? '—' : sp(x > 0.1 ? 'pos' : x < -0.1 ? 'neg' : '', fR(x)));
   frag.push(h('div', { class: 'stats' },
-    stat('Correlação', cR(r.r), r.rw != null ? h('span', null, 'nos municípios: ', fR(r.rw)) : `${fInt(r.n)} ${r.unidade === 'local' ? 'locais' : 'seções'}`,
+    stat('Correlação', cR(r.r), r.rw != null ? h('span', null, `nos ${r.blocos}: `, fR(r.rw)) : `${fInt(r.n)} seções`,
       'De −1 a 1: os votos dos dois sobem e descem juntos de um local de votação para outro? "Nos municípios" desconta a média de cada cidade: separa coincidência regional de eleitorado comum.'),
     stat('Afinidade', fX(r.lift), `${Y} onde ${X} vota ÷ média`, 'Quanto Y faz no lugar médio onde vota o eleitor de X, dividido pela média de Y no recorte. 1,00× = indiferente; 2× = o dobro; 0,5× = a metade.'),
     r.lim ? stat('Teto certo', fInt(r.lim.hi), `votos de ${Y} podem ter vindo de quem votou em ${X}`, 'Em cada urna, quem votou nos dois não passa do menor dos dois números. Somando as urnas, este é o máximo possível. Não é estimativa: é certo.')
@@ -267,7 +239,7 @@ export function renderMain(el, level, id, ctx) {
       h('div', { class: 'kv' }, h('span', null, `Votos de ${X}`), h('b', { class: 'tn' }, `${fInt(r.tx)} (${fP(r.px)})`)),
       h('div', { class: 'kv' }, h('span', null, `Votos de ${Y}`), h('b', { class: 'tn' }, `${fInt(r.ty)} (${fP(r.py)})`)),
       h('div', { class: 'kv' }, h('span', null, 'Correlação'), h('b', { class: 'tn' }, fR(r.r) + ci('r'))),
-      r.rw != null ? h('div', { class: 'kv' }, h('span', null, 'Nos municípios'), h('b', { class: 'tn' }, fR(r.rw) + ci('rw'))) : null,
+      r.rw != null ? h('div', { class: 'kv' }, h('span', null, `Dentro dos ${r.blocos}`), h('b', { class: 'tn' }, fR(r.rw) + ci('rw'))) : null,
       h('div', { class: 'kv' }, h('span', null, 'Afinidade'), h('b', { class: 'tn' }, fX(r.lift) + (r.ci?.lift ? ` (${fX(r.ci.lift[0])} a ${fX(r.ci.lift[1])})` : ''))),
       r.lim ? h('div', { class: 'kv' }, h('span', null, 'Votos em comum (certo)'), h('b', { class: 'tn' }, `${fInt(r.lim.lo)} a ${fInt(r.lim.hi)}`)) : null,
       h('div', { class: 'kv' }, h('span', null, 'Unidades de análise'), h('b', { class: 'tn' }, `${fInt(r.n)} ${r.unidade === 'local' ? 'locais' : 'seções'}`)),
@@ -282,14 +254,44 @@ export function renderMain(el, level, id, ctx) {
 
 // ------------------------------------------------------------------ cartão lateral (UF)
 export function renderSide(el, level, id, ctx) {
-  const tab = ctx.tab || 'junto';
+  const tab = ctx.tab || 'trouxe';
   const tabs = h('div', { class: 'tabs', role: 'tablist' });
-  for (const [k, t] of [['junto', 'Anda junto'], ['onde', 'Onde'], ['pontos', 'Pontos']]) tabs.append(h('button', { type: 'button', role: 'tab', class: 'tab' + (k === tab ? ' on' : ''), 'aria-selected': String(k === tab), onclick: () => ctx.onTab(k) }, t));
+  for (const [k, t] of [['trouxe', 'Quem trouxe'], ['junto', 'Anda junto'], ['onde', 'Onde'], ['pontos', 'Pontos']]) tabs.append(h('button', { type: 'button', role: 'tab', class: 'tab' + (k === tab ? ' on' : ''), 'aria-selected': String(k === tab), onclick: () => ctx.onTab(k) }, t));
   const b = h('div', { class: 'side-b' });
-  if (tab === 'junto') junto(b, ctx);
+  if (tab === 'trouxe') trouxe(b, ctx);
+  else if (tab === 'junto') junto(b, ctx);
   else if (tab === 'onde') onde(b, level, id, ctx);
   else pontos(b, level, id, ctx);
   clear(el).append(tabs, b);
+}
+
+/** Ranking: para Y, os candidatos de um cargo cujos eleitores mais votaram em Y (fração estimada e votos). */
+function trouxe(b, ctx) {
+  const cy = candOf(A.y), Y = curto(cy.nome);
+  const cargos = [...D.cargos.keys()].filter((c) => c !== cy.cargo || c === 5);
+  b.append(h('div', { class: 'sec-t' }, h('b', null, `Quem trouxe votos para ${Y}`)));
+  const chips = h('div', { class: 'chips' });
+  for (const c of cargos) chips.append(h('button', { type: 'button', class: 'chip' + (c === ctx.trouxeCargo ? ' on' : ''), onclick: () => ctx.onTrouxeCargo(c) }, cargoCurto(c)));
+  const ord = h('div', { class: 'chips' });
+  for (const [k, t] of [['est', '% dos eleitores'], ['votos', 'votos levados']]) ord.append(h('button', { type: 'button', class: 'chip' + (k === ctx.trouxeOrd ? ' on' : ''), onclick: () => ctx.onTrouxeOrd(k) }, t));
+  b.append(chips, ord);
+  const res = ctx.trouxe();
+  if (!res || res.loading) { b.append(h('div', { class: 'side-note' }, 'Calculando todos os candidatos…'), h('div', { class: 'skel', style: { height: '260px' } })); return; }
+  const lista = res.lista.slice().sort((p, q) => (ctx.trouxeOrd === 'votos' ? q.comum - p.comum : q.est - p.est)).slice(0, 25);
+  if (!lista.length) { b.append(h('div', { class: 'side-note' }, 'Nenhum candidato com votos suficientes neste recorte.')); return; }
+  const max = Math.max(...lista.map((l) => (ctx.trouxeOrd === 'votos' ? l.comum : l.est)));
+  lista.forEach((l, i) => {
+    const c = candOf(l.key);
+    if (!c) return;
+    const val = ctx.trouxeOrd === 'votos' ? l.comum : l.est;
+    b.append(h('button', { type: 'button', class: 'row rk' + (l.key === A.x ? ' on' : ''), onclick: () => ctx.onX(l.key), title: `Ver ${c.nome} × ${cy.nome}` },
+      h('span', { class: 'rk-i tn' }, String(i + 1)), avatar(c, 34),
+      h('span', { class: 'row-n' }, h('b', null, c.nome), h('span', null, `${c.partido} ${c.n} · ${fInt(l.tx)} votos`)),
+      h('span', { class: 'row-v tn' }, h('b', null, ctx.trouxeOrd === 'votos' ? `~${fInt(l.comum)}` : `${fP0(l.est)}`),
+        h('span', { class: 'meter' }, h('i', { style: { width: `${Math.max(2, (val / max) * 100)}%`, background: 'var(--x)' } })),
+        h('span', null, ctx.trouxeOrd === 'votos' ? `${fP0(l.est)} deles` : `~${fInt(l.comum)} votos`))));
+  });
+  b.append(h('div', { class: 'side-note' }, `% estimada dos eleitores de cada candidato que também votou em ${Y}, por seção, presa aos limites certos de cada urna. Candidatos com menos de ${fInt(res.minimo)} votos no recorte ficam de fora (a conta vira ruído). Toque para comparar.`));
 }
 
 function junto(b, ctx) {
@@ -381,8 +383,8 @@ function scatter(r, onPick) {
     const yAt = (x) => r.gd.a + r.gd.b * x;
     c.beginPath(); c.moveTo(X(0), Y(Math.max(0, Math.min(my, yAt(0))))); c.lineTo(X(mx), Y(Math.max(0, Math.min(my, yAt(mx))))); c.stroke();
   }
-  c.fillStyle = '#ebcf55'; c.textAlign = 'right'; c.fillText(`${curto(nomeCand(A.x))} →`, W - P.r, H - 4);
-  c.save(); c.translate(10, P.t); c.rotate(-Math.PI / 2); c.fillStyle = '#82b1ec'; c.textAlign = 'right'; c.fillText(`${curto(nomeCand(A.y))} →`, 0, 0); c.restore();
+  c.fillStyle = '#6aa8f5'; c.textAlign = 'right'; c.fillText(`${curto(nomeCand(A.x))} →`, W - P.r, H - 4);
+  c.save(); c.translate(10, P.t); c.rotate(-Math.PI / 2); c.fillStyle = '#f4f1ea'; c.textAlign = 'right'; c.fillText(`${curto(nomeCand(A.y))} →`, 0, 0); c.restore();
   const near = (ev) => {
     const bb = cv.getBoundingClientRect(), s = W / bb.width;
     const x = (ev.clientX - bb.left) * s, y = (ev.clientY - bb.top) * s;

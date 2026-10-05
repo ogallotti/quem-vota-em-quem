@@ -1,5 +1,6 @@
 // Lentes do mapa e paletas. Cada cor faz um único trabalho (skill dataviz):
-//   bivariada  3×3 (X em amarelo, Y em azul, os dois fortes = verde), classes em relação à média do recorte
+//   luz e cor  Y é a luz (cinza ao branco), X é a cor (azul): azul claro e vivo = os dois fortes
+//   bivariada  3×3 (X em azul, Y em amarelo, os dois fortes = verde), classes em relação à média do recorte
 //   magnitude  sequencial de um matiz, do claro (pouco) ao saturado (muito); branco = nenhum voto
 //   polaridade divergente rosa ↔ verde com meio cinza claro (correlação negativa ↔ positiva)
 import { fPct } from './fmt.js';
@@ -7,11 +8,11 @@ import { fPct } from './fmt.js';
 export const NOVOTE = '#ffffff';
 export const SEM_DADO = '#8a8983';
 // cor de identidade de X e de Y em toda a interface (chips, eixos, legendas)
-export const COR = { x: '#e7c94a', y: '#6f9fd8', xs: '#c9a92c', ys: '#4a7fc0' };
+export const COR = { x: '#5b9cf0', y: '#f2efe8', xs: '#4a7fc0', ys: '#c9a92c' };
 
-// Bivariada amarelo × azul (somados dão verde), no método de Joshua Stevens (2015). Índice = iy·3 + ix
+// Bivariada azul (X) × amarelo (Y), somados dão verde, no método de Joshua Stevens (2015). Índice = iy·3 + ix
 // (0 abaixo da média, 1 na média, 2 acima): linha de baixo = Y fraco, coluna da direita = X forte.
-export const BIV = ['#e8e8e8', '#ece0a0', '#e7c94a', '#b9cde6', '#b5d0a4', '#a8c060', '#6f9fd8', '#5ea79a', '#3f8f4f'];
+export const BIV = ['#e8e8e8', '#b9cde6', '#6f9fd8', '#ece0a0', '#b5d0a4', '#5ea79a', '#e7c94a', '#a8c060', '#3f8f4f'];
 export const BIV_TXT = [
   'Os dois fracos', 'X na média, Y fraco', 'Só X forte',
   'X fraco, Y na média', 'Os dois na média', 'X forte, Y na média',
@@ -19,47 +20,43 @@ export const BIV_TXT = [
 ];
 
 export const RAMP = {
-  x: ['#fbf5d8', '#f5e9a8', '#eedb72', '#e7c94a', '#c9a92c', '#9a8020', '#6b5915'],
-  y: ['#e3edf9', '#c4d8f1', '#9ebfe7', '#6f9fd8', '#4a7fc0', '#33609a', '#234573'],
+  x: ['#e3edf9', '#c4d8f1', '#9ebfe7', '#6f9fd8', '#4a7fc0', '#33609a', '#234573'],
+  y: ['#fbf5d8', '#f5e9a8', '#eedb72', '#e7c94a', '#c9a92c', '#9a8020', '#6b5915'],
 };
 // correlação: rosa (ao contrário) ↔ verde (juntos), segura para daltonismo (PiYG)
 export const DIV = ['#c51b7d', '#de77ae', '#f1b6da', '#eceae4', '#b8e186', '#7fbc41', '#4d9221'];
 export const R_CORTES = [-0.5, -0.3, -0.1, 0.1, 0.3, 0.5];
 export const R_TXT = ['−0,5 ou menos', '−0,5 a −0,3', '−0,3 a −0,1', 'nenhuma (±0,1)', '0,1 a 0,3', '0,3 a 0,5', '0,5 ou mais'];
 
-// "Onde X é forte" (valor × transparência, Roth et al. 2010): o BRILHO diz onde X é forte (quintis do eleitorado, do
-// apagado ao cheio) e a COR diz como Y foi ali (amarelo = Y fraco, X sozinho; amarelo-esverdeado = na média; verde =
-// Y forte, interseção). Índice = faixa de X (0 apagada … 4 cheia) × 3 + faixa de Y (0, 1, 2).
-const BG_MAPA = [15, 14, 13];
-export const XT_COR = ['#e7c94a', '#b3c35a', '#3f9a52'];
-export const XT_ALFA = [0.12, 0.26, 0.45, 0.7, 1];
-const mistura = (hex, a) => '#' + [1, 3, 5].map((i, k) => Math.round(BG_MAPA[k] + a * (parseInt(hex.slice(i, i + 2), 16) - BG_MAPA[k])).toString(16).padStart(2, '0')).join('');
-export const XT = XT_ALFA.flatMap((a) => XT_COR.map((c) => mistura(c, a)));
-
-// Bolhas: tamanho = votos de X no lugar; cor = força de Y ali (÷ média do recorte), do amarelo (X sozinho) ao verde (juntos)
-export const BOLHA = ['#f2c94c', '#e3d48f', '#cfccc0', '#86c06e', '#3f9a52']; // amarelo · neutro · verde: só os desvios ganham cor
-export const BOLHA_CORTES = [0.6, 0.85, 1.18, 1.65];
-export const BOLHA_TXT = ['bem abaixo da média', 'abaixo da média', 'na média', 'acima da média', 'bem acima da média'];
-export const classeBolha = (rel) => { let i = 0; while (i < BOLHA_CORTES.length && rel >= BOLHA_CORTES[i]) i++; return i; };
-
 // Luz e cor: Y é a LUZ (escala de cinza, do apagado ao branco, por quintis do eleitorado) e X é a COR por cima
-// (amarelo, da ausência à saturação máxima). Amarelo claro e vivo = os dois fortes. Cores em OKLCH, para a luminosidade
+// (azul, da ausência à saturação máxima). Azul claro e vivo = os dois fortes. Cores em OKLCH, para a luminosidade
 // ser percebida igual em todas as casas. Índice = faixa de Y (0–4) × 5 + faixa de X (0–4).
-function oklch(L, C, hDeg) {
+function oklchLin(L, C, hDeg) {
   const h = (hDeg * Math.PI) / 180, a = C * Math.cos(h), b = C * Math.sin(h);
   const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3, m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3, s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
-  const lin = [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s, -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s];
-  return '#' + lin.map((v) => { const g = v <= 0.0031308 ? 12.92 * v : 1.055 * v ** (1 / 2.4) - 0.055; return Math.round(Math.max(0, Math.min(1, g)) * 255).toString(16).padStart(2, '0'); }).join('');
+  return [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s, -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s];
 }
-export const YX_L = [0.25, 0.42, 0.59, 0.76, 0.94];
-export const YX_C = [0, 0.05, 0.095, 0.14, 0.18];
-export const YX = YX_L.flatMap((L) => YX_C.map((C) => oklch(L, C * Math.min(1, (L + 0.05) / 0.75), 96)));
+/** OKLCH → hex, reduzindo a croma até caber na tela (o matiz e a luz ficam; só a saturação cede). */
+function oklch(L, C, hDeg) {
+  let lo = 0, hi = C;
+  const cabe = (c) => oklchLin(L, c, hDeg).every((v) => v >= -1e-4 && v <= 1 + 1e-4);
+  if (!cabe(C)) { for (let i = 0; i < 24; i++) { const mid = (lo + hi) / 2; if (cabe(mid)) lo = mid; else hi = mid; } C = lo; }
+  return '#' + oklchLin(L, C, hDeg).map((v) => { const g = v <= 0.0031308 ? 12.92 * v : 1.055 * Math.max(0, v) ** (1 / 2.4) - 0.055; return Math.round(Math.max(0, Math.min(1, g)) * 255).toString(16).padStart(2, '0'); }).join('');
+}
+export const YX_L = [0.24, 0.40, 0.56, 0.72, 0.88];
+export const YX_F = [0, 0.32, 0.58, 0.82, 1]; // fração da saturação máxima que cabe na tela naquela luz
+export const YX_H = 240; // azul (levemente para o ciano, que aguenta mais saturação no claro)
+/** Croma máxima de um matiz numa luz (busca binária no gamut sRGB). */
+function cromaMax(L, hDeg) {
+  let lo = 0, hi = 0.4;
+  for (let i = 0; i < 24; i++) { const mid = (lo + hi) / 2; if (oklchLin(L, mid, hDeg).every((v) => v >= -1e-4 && v <= 1 + 1e-4)) lo = mid; else hi = mid; }
+  return lo;
+}
+export const YX = YX_L.flatMap((L) => { const cm = cromaMax(L, YX_H); return YX_F.map((f) => oklch(L, f * cm, YX_H)); });
 
 export const LENTES = {
-  yx: { id: 'yx', label: 'Luz e cor', curto: 'Luz e cor', desc: 'Luz = onde Y tem voto (branco onde mais tem, apagado onde não tem). Cor = onde X tem voto (amarelo mais vivo onde X é mais forte). Amarelo claro e vivo: os dois fortes.' },
-  bo: { id: 'bo', label: 'Eleitores de X', curto: 'Bolhas', desc: 'Cada bolha são os eleitores de X naquele lugar (tamanho = votos de X). A cor diz como Y foi ali: amarelo = Y fraco (X sozinho), verde = Y forte (os dois juntos). Bolhas grandes e verdes: quem vota em X também vota em Y.' },
-  xt: { id: 'xt', label: 'Onde X é forte', curto: 'Onde X é forte', desc: 'Brilho = onde X é forte (cheio nos 20% do eleitorado em que X vai melhor, apagando nos demais). Cor = como Y foi ali: amarelo = Y fraco, verde = Y forte. Área brilhante e verde: interseção.' },
-  bi: { id: 'bi', label: 'Onde os dois são fortes', curto: 'X × Y', desc: 'Cada área comparada com a média do recorte: amarelo = só X acima da média, azul = só Y, verde = os dois. Muito verde e cinza, pouco amarelo e azul: os eleitorados coincidem.' },
+  yx: { id: 'yx', label: 'Luz e cor', curto: 'Luz e cor', desc: 'Luz = onde Y tem voto (branco onde mais tem, apagado onde não tem). Cor = onde X tem voto (azul mais vivo onde X é mais forte). Azul claro e vivo: os dois fortes.' },
+  bi: { id: 'bi', label: 'Onde os dois são fortes', curto: 'X × Y', desc: 'Cada área comparada com a média do recorte: azul = só X acima da média, amarelo = só Y, verde = os dois. Muito verde e cinza, pouco azul e amarelo: os eleitorados coincidem.' },
   x: { id: 'x', label: 'Votos de X', curto: 'X', desc: 'Participação de X: votos ÷ eleitores que compareceram.' },
   y: { id: 'y', label: 'Votos de Y', curto: 'Y', desc: 'Participação de Y: votos ÷ eleitores que compareceram.' },
   r: { id: 'r', label: 'Correlação local', curto: 'r', clamp: { local: 'bairro', secao: 'bairro' }, desc: 'Dentro de cada área, X e Y sobem e descem juntos de um local de votação para outro? Verde = sim, rosa = ao contrário, cinza = sem relação. Mostra onde a dobradinha funciona.' },
