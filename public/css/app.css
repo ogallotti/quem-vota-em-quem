@@ -83,6 +83,8 @@ h1.hero em { font-style: italic; }
 .cc { width: 100%; display: grid; grid-template-columns: 44px minmax(0, 1fr) 16px; align-items: center; gap: 12px; padding: 7px 10px 7px 7px; border-radius: 14px; border: 1px solid var(--line-2); background: var(--s2); text-align: left; transition: border-color .15s, background .15s; }
 .cc:hover { background: var(--s3); }
 .cc-x { box-shadow: inset 3px 0 0 var(--x); }
+.cc.cc-add { border-style: dashed; background: transparent; box-shadow: none; }
+.cc-add .cc-t b { color: var(--ink-2); }
 .cc-y { box-shadow: inset 3px 0 0 var(--y); }
 .cc-t { display: flex; flex-direction: column; min-width: 0; }
 .cc-t b { font: 500 19px/1.15 var(--serif); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

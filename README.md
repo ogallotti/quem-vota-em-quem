@@ -8,6 +8,7 @@ Site estático (HTML/CSS/JS puro, sem build, sem backend), MapLibre GL para o ma
 
 ## O que ele mostra
 
+- **Um candidato só** ("voo só de ida"): escolher um candidato na busca geral abre só ele, com votos, participação, posição no cargo e onde está o voto (concentração), o mapa da votação dele, a aba Em comum (em quem votaram os eleitores dele, estimativa) e sugestões para comparar. "Comparar com…" escolhe o Y; "ver só X" volta. Endereço: `#uf=ma&x=3:55` (sem `y`).
 - **A pergunta no topo**: "Quem vota em [X] também vota em [Y]?". X e Y podem ser candidatos de qualquer cargo. No seletor do Y há dois atalhos, **Esquerda** (Lula) e **Direita** (Flávio Bolsonaro); fora isso, presidente só aparece se a pessoa escolher. O par padrão de um estado é governador × senador.
 - **A resposta em três camadas**, para o recorte selecionado (estado, região, município, zona, bairro, local de votação ou seção):
   1. **Certo, pelas urnas**: em cada seção, quem votou nos dois não passa do menor dos dois números nem fica abaixo da soma menos o comparecimento. Somando as seções, sai a faixa certa de eleitores em comum. Sem hipótese nenhuma.

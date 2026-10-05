@@ -5,7 +5,7 @@ import { BR, D, LEVEL_INFO, candOf, focusGeometry, getProps, loadBR, loadCands, 
 import { abrirBusca, buscaAberta, fecharBusca } from './busca.js';
 import { clear, h } from './fmt.js';
 import { MapView } from './map.js';
-import { eleitoresDe, quemVotouEm } from './ranking.js';
+import { eleitoresDe, posicao, quemVotouEm } from './ranking.js';
 import { Tooltip, classeBiv, renderCrumbs, renderLegend, renderMain, renderMainBR, renderSide, renderSideBR } from './panel.js';
 import { BIV, DIV, LENTES, NOVOTE, RAMP, SEM_DADO, YX, classeR, classeSeq, classesSeq } from './scales.js';
 import { faixa, quantis, quantisPonderados, terco } from './stats.js';
@@ -64,8 +64,8 @@ function writeHash() {
     if (aplicandoHash) return;
     const q = new URLSearchParams();
     if (state.modo === 'uf') {
-      q.set('uf', state.uf); q.set('x', state.x); q.set('y', state.y);
-      if (state.lente !== 'yx') q.set('l', state.lente);
+      q.set('uf', state.uf); q.set('x', state.x); if (state.y) q.set('y', state.y);
+      if (state.y && state.lente !== 'yx') q.set('l', state.lente);
       if (state.sel.level !== 'estado') q.set('s', `${state.sel.level}:${state.sel.id}`);
     }
     const s = q.toString().replace(/%3A/g, ':');
@@ -84,8 +84,8 @@ function pintarBR() {
 function pintar() {
   if (!A.X || !view || state.modo !== 'uf') return;
   const { level: sl, id: si } = state.sel;
-  const r = recorte(sl, si);
-  const lente = state.lente;
+  const lente = lenteAtiva();
+  const r = state.y ? recorte(sl, si) : { px: valorDe(sl, si)?.px || 0, py: 0 };
   state.ctx = { px: r.px, py: r.py };
   const fora = (lv, id) => { const set = unidadesNoRecorte(lv, sl, si); return set && !set.has(id); };
   const cache = new Map();
@@ -142,10 +142,13 @@ function pintar() {
   legenda();
 }
 
+/** Sem Y, só existe a lente de X. */
+const lenteAtiva = () => (state.y ? state.lente : 'x');
+
 function legenda() {
   $('legend').hidden = false;
   if (state.modo !== 'uf' || !state.seq) return;
-  const { level: sl, id: si } = state.sel, lente = state.lente;
+  const { level: sl, id: si } = state.sel, lente = lenteAtiva();
   renderLegend($('legend'), { lente, classes: lente === 'x' || lente === 'y' ? state.seq(view.view?.poly || 'municipio') : null, escopo: sl === 'estado' ? 'do estado' : `de ${getProps(sl, si)?.n || ''}` });
 }
 
@@ -162,8 +165,17 @@ const ctxSide = () => ({
   onComumCargo: (c) => { state.comumCargo[state.sentido] = c; renderCards(); },
   onOrdem: (o) => { state.ordem = o; renderCards(); },
   onX: (k) => ctl.setX(k),
+  onSolo: () => ctl.setPar(state.x, null),
   distribuicao: pedirDistribuicao,
+  posicao: () => { const { level, id } = state.sel, cargo = candOf(state.x)?.cargo; return assincrono('pos', `${state.x}|${level}:${id}`, () => posicao(state.x, cargo, level, id)); },
+  sugestoesSolo: pedirSugestoesSolo,
 });
+/** Modo de um candidato só: em quem mais votaram os eleitores de X no cargo "par natural" (estimativa). */
+function pedirSugestoesSolo() {
+  const { level, id } = state.sel, cargo = cargoComum('de');
+  return assincrono('sug', `${A.ver}|${cargo}|${level}:${id}`, () => eleitoresDe(state.x, A.X, cargo, level, id)
+    .then(({ lista }) => ({ cargo: (D.cargos.get(cargo)?.nome || '').toLowerCase(), lista: lista.slice(0, 3) })));
+}
 /** Cálculos assíncronos do painel: devolve {loading} e redesenha quando o resultado chega. */
 const pend = new Map();
 function assincrono(nome, k, f) {
@@ -182,19 +194,19 @@ function pedirDistribuicao() {
     return lista.filter((l) => top.has(l.key)).map((l) => ({ key: l.key, modelos: [Math.min(l.est, l.viz), Math.max(l.est, l.viz)], demais: l.demais ? [Math.min(...l.demais), Math.max(...l.demais)] : [0, 0] }));
   }));
 }
-/** Par natural de um cargo (estadual ↔ federal; majoritários → estadual). */
+/** Par natural de um cargo (deputado estadual ↔ federal; governador ↔ senador; presidente → governador). */
 function parNatural(c) {
   const tem = (k) => D.cargos.has(k);
-  return { 6: tem(7) ? 7 : 8, 7: 6, 8: 6, 3: tem(7) ? 7 : 8, 5: tem(7) ? 7 : 8, 1: tem(7) ? 7 : 8 }[c];
+  return { 6: tem(7) ? 7 : 8, 7: 6, 8: 6, 3: 5, 5: 3, 1: 3 }[c];
 }
 /** Cargo da aba "Em comum": o escolhido, ou o cargo do outro candidato, ou o par natural; nunca a vaga exclusiva. */
 function cargoComum(sentido) {
-  const fixo = candOf(sentido === 'de' ? state.x : state.y)?.cargo, outro = candOf(sentido === 'de' ? state.y : state.x)?.cargo;
+  const fixo = candOf(sentido === 'de' || !state.y ? state.x : state.y)?.cargo, outro = state.y ? candOf(sentido === 'de' ? state.y : state.x)?.cargo : null;
   const ok = (c) => c && D.cargos.has(c) && (c !== fixo || c === 5);
   return [state.comumCargo[sentido], outro, parNatural(fixo)].find(ok) || [...D.cargos.keys()].find(ok);
 }
 function pedirComum() {
-  const s = state.sentido, cargo = cargoComum(s), { level, id } = state.sel;
+  const s = state.y ? state.sentido : 'de', cargo = cargoComum(s), { level, id } = state.sel;
   return s === 'de'
     ? assincrono('comum', `de|${A.ver}|${cargo}|${level}:${id}`, () => eleitoresDe(state.x, A.X, cargo, level, id))
     : assincrono('comum', `para|${A.ver}|${cargo}|${level}:${id}`, () => quemVotouEm(state.y, A.Y, cargo, level, id));
@@ -222,13 +234,13 @@ function renderTop() {
   for (const id of ['yx', 'bi', 'x', 'y', 'r']) seg.append(h('button', { type: 'button', role: 'radio', 'aria-checked': String(state.lente === id), class: state.lente === id ? 'on' : '', title: LENTES[id].desc, onclick: () => ctl.setLente(id) }, nomes[id]));
   const niv = h('div', { class: 'seg', role: 'radiogroup', 'aria-label': 'Nível do mapa' });
   for (const [id, t] of [['auto', 'Auto'], ['municipio', 'Municípios'], ['bairro', 'Bairros'], ['local', 'Locais'], ['secao', 'Seções']]) niv.append(h('button', { type: 'button', role: 'radio', 'aria-checked': String(state.mode === id), class: state.mode === id ? 'on' : '', onclick: () => ctl.setMode(id) }, t));
-  mb.append(seg, niv, CRUMBS);
+  mb.append(...(state.y ? [seg] : []), niv, CRUMBS);
 }
 
 // ------------------------------------------------------------------ controle
 const ctl = {
-  /** Abre um estado (com par, lente e seleção opcionais). */
-  async entrar(uf, { x = null, y = null, sel = null, lente = null } = {}) {
+  /** Abre um estado. y: chave = par; null = só X; omitido = par padrão (governador × senador). */
+  async entrar(uf, { x = null, y, sel = null, lente = null } = {}) {
     if (!BR.ufs.get(uf)?.ok) { toast('Os dados deste estado ainda estão sendo processados'); return; }
     fecharBusca();
     const trocou = state.uf !== uf;
@@ -244,8 +256,8 @@ const ctl = {
     x = x && candOf(x) ? x : state.x && !trocou && state.modo === 'uf' ? state.x : gov;
     // par padrão só com disputas do estado (governador × senador mais votados); presidente só se a pessoa escolher
     const padraoY = [D.cargos.get(5)?.cands[0]?.key, D.cargos.get(3)?.cands[1]?.key, D.cargos.get(6)?.cands[0]?.key].find((k) => k && k !== x);
-    y = y && candOf(y) && y !== x ? y : padraoY;
-    const [X, Y] = await Promise.all([loadSerie(x), loadSerie(y)]);
+    y = y === null ? null : y && candOf(y) && y !== x ? y : padraoY;
+    const [X, Y] = await Promise.all([loadSerie(x), y ? loadSerie(y) : null]);
     polos = { esq: pk.esq && { key: pk.esq }, dir: pk.dir && { key: pk.dir } }; // só para os atalhos do seletor
     Object.assign(state, { modo: 'uf', x, y, mais: false });
     if (lente && LENTES[lente]) state.lente = lente;
@@ -268,16 +280,17 @@ const ctl = {
     pintarBR(); renderTop(); renderCards(); view.fit('br', 0);
     writeHash();
   },
+  /** y = null: só X ("voo só de ida"). */
   async setPar(x, y) {
-    if (!candOf(x) || !candOf(y) || x === y) return;
-    const [X, Y] = await Promise.all([loadSerie(x), loadSerie(y)]);
+    if (!candOf(x) || (y != null && (!candOf(y) || x === y))) return;
+    const [X, Y] = await Promise.all([loadSerie(x), y ? loadSerie(y) : null]);
     state.x = x; state.y = y;
     setPar(x, X, y, Y);
     pintar(); renderTop(); renderCards(); writeHash();
   },
-  setX(x) { return ctl.setPar(x, x === state.y ? state.x : state.y); },
-  setY(y) { return ctl.setPar(y === state.x ? state.y : state.x, y); },
-  trocar() { return ctl.setPar(state.y, state.x); },
+  setX(x) { return ctl.setPar(x, !state.y ? null : x === state.y ? state.x : state.y); },
+  setY(y) { if (!state.y && y === state.x) return; return ctl.setPar(y === state.x ? state.y : state.x, y); },
+  trocar() { if (state.y) return ctl.setPar(state.y, state.x); },
   async select(level, id, { fit = true } = {}) {
     if (state.modo !== 'uf' || (level !== 'estado' && !getProps(level, id))) return;
     state.sel = { level, id };
@@ -297,7 +310,7 @@ const ctl = {
     if (mobile() && $('sheet').dataset.snap === 'full') setSnap('half');
     writeHash();
   },
-  setLente(id) { if (!LENTES[id]) return; state.lente = id; pintar(); renderTop(); writeHash(); },
+  setLente(id) { if (!LENTES[id] || !state.y) return; state.lente = id; pintar(); renderTop(); writeHash(); },
   setMode(m) { state.mode = m; view.setMode(m); if (m === 'local' || m === 'secao') carregarPolys(view.municipiosVisiveis()); renderTop(); },
 };
 window.__ctl = ctl;
@@ -331,10 +344,11 @@ function puxar() {
 let refreshT = 0;
 function agendarRefresh() { clearTimeout(refreshT); refreshT = setTimeout(() => view.refreshFine(), 120); }
 
+/** Candidato escolhido na busca geral ou na capa: abre só ele (sem comparação). */
 function escolherCand(c) {
   if (c.uf === 'br' || (c.cargo === 1 && state.modo !== 'uf')) { escolherEstado(c); return; }
-  if (state.modo === 'uf' && (c.uf === state.uf || c.cargo === 1)) return ctl.setX(c.key);
-  return ctl.entrar(c.uf, { x: c.key });
+  if (state.modo === 'uf' && (c.uf === state.uf || c.cargo === 1)) return ctl.setPar(c.key, null);
+  return ctl.entrar(c.uf, { x: c.key, y: null });
 }
 
 /** Presidente concorre no país inteiro: pergunta em qual estado olhar. */
@@ -342,7 +356,7 @@ function escolherEstado(c) {
   const ufs = [...BR.ufs.values()].sort((a, b) => a.n.localeCompare(b.n, 'pt-BR'));
   const lista = h('div', { class: 'pal-list' });
   const bg = h('div', { class: 'pal-bg', onclick: (e) => { if (e.target === bg) bg.remove(); } });
-  for (const u of ufs) lista.append(h('button', { type: 'button', class: 'row', disabled: !u.ok || null, onclick: () => { bg.remove(); ctl.entrar(u.uf, { x: c.key }); } },
+  for (const u of ufs) lista.append(h('button', { type: 'button', class: 'row', disabled: !u.ok || null, onclick: () => { bg.remove(); ctl.entrar(u.uf, { x: c.key, y: null }); } },
     h('span', { class: 'av', style: { width: '30px', height: '30px' } }, h('b', { style: { fontSize: '11px', color: 'var(--ink-2)' } }, u.uf.toUpperCase())),
     h('span', { class: 'row-n' }, h('b', null, u.n), h('span', null, u.ok ? '' : 'em processamento')), h('span')));
   bg.append(h('div', { class: 'pal', role: 'dialog', 'aria-modal': 'true' }, h('div', { class: 'pal-ctx', style: { padding: '16px' } }, `${c.nome} concorre no Brasil inteiro. Em qual estado você quer ver quem vota em ${c.nome}?`), lista));
@@ -358,6 +372,7 @@ function abrirPicker(modo) {
         if (c.uf !== state.uf && c.cargo !== 1) { toast('Para comparar, Y precisa ser do mesmo estado (ou candidato a presidente)'); return; }
         return ctl.setY(c.key);
       }
+      if (modo === 'x' && state.modo === 'uf' && (c.uf === state.uf || c.cargo === 1)) return ctl.setX(c.key);
       return escolherCand(c);
     },
     onLugar: (l, i) => ctl.select(l, i),
@@ -395,7 +410,7 @@ async function aplicarHash() {
   try {
     if (q.uf && BR.ufs.get(q.uf)?.ok) {
       const [lv, idS] = (q.s || '').split(':');
-      await ctl.entrar(q.uf, { x: q.x, y: q.y, lente: q.l });
+      await ctl.entrar(q.uf, { x: q.x, y: q.x ? q.y ?? null : undefined, lente: q.l });
       if (lv) {
         if (['zona', 'bairro'].includes(lv)) await loadZB().catch(() => {});
         await ctl.select(lv, Number(idS));
@@ -420,7 +435,7 @@ async function boot() {
           if (p) tooltip.showBR(p, hit.level, pt);
           return;
         }
-        tooltip.show(hit.level, hit.id, pt, { ...state.ctx, lente: state.lente });
+        tooltip.show(hit.level, hit.id, pt, { ...state.ctx, lente: lenteAtiva() });
       },
       onPick: (hit) => {
         if (hit.level === 'uf') { const p = BR.states.features.find((f) => f.properties.id === hit.id)?.properties; if (p) ctl.entrar(p.uf); return; }

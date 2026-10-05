@@ -1,6 +1,6 @@
 // Cartões da interface: a pergunta e a resposta (esquerda), "em comum / onde / pontos" (direita), a tela inicial do
 // Brasil, a legenda, a trilha e a dica do mapa. Texto dos dados entra sempre por textContent (h()).
-import { A, rPorUnidade, recorte, territorio, valorDe } from './analise.js';
+import { A, perfil, rPorUnidade, recorte, territorio, valorDe } from './analise.js';
 import { BR, D, LEVEL_INFO, candOf, cargoOf, childrenOf, entityName, getProps, parentChain } from './data.js';
 import { clear, fInt, fPct, h } from './fmt.js';
 import { BIV, BIV_TXT, DIV, SEM_DADO, YX } from './scales.js';
@@ -61,9 +61,9 @@ export class Tooltip {
         h('div', { class: 'tip-h' }, LEVEL_INFO[level].label),
         h('div', { class: 'tip-n' }, entityName(level, p)),
         this.linha(curto(nomeCand(A.x)), `${fP(v.px)} · ${fInt(v.x)}`, 'x'),
-        this.linha(curto(nomeCand(A.y)), `${fP(v.py)} · ${fInt(v.y)}`, 'y'),
+        A.y ? this.linha(curto(nomeCand(A.y)), `${fP(v.py)} · ${fInt(v.y)}`, 'y') : null,
         this.linha('Compareceram', fInt(v.dx)),
-        ctx.lente === 'r'
+        !A.y ? null : ctx.lente === 'r'
           ? h('div', { class: 'tip-f' }, `Correlação entre os locais: ${fR(Number.isNaN(rl) ? null : rl)}`)
           : h('div', { class: 'tip-f' }, h('i', { style: { background: k >= 0 ? BIV[k] : SEM_DADO } }), textoBiv(k)),
       );
@@ -130,6 +130,8 @@ export function renderCrumbs(el, level, id, onGo) {
   });
 }
 
+const camada = (rot, cls, ...filhos) => h('section', { class: `camada ${cls}` }, h('div', { class: 'camada-t' }, rot), ...filhos);
+
 /** Barra 0–100% com o intervalo provável. */
 function barra(v, ic, cls = '', escala = 1) {
   const pct = (x) => `${Math.max(0, Math.min(100, (x / escala) * 100))}%`;
@@ -141,6 +143,7 @@ const stat = (l, v, s, info) => h('div', { class: 'stat' }, h('div', { class: 's
 export function renderMain(el, level, id, ctx) {
   const p = getProps(level, id);
   if (!p || !A.X) return;
+  if (!A.y) return renderSolo(el, level, id, ctx);
   const r = recorte(level, id);
   const nome = level === 'estado' ? D.meta.uf_nome : entityName(level, p);
   const escopo = level === 'estado' ? { em: 'no estado', de: 'do estado' } : { em: `em ${nome}`, de: `de ${nome}` };
@@ -153,7 +156,7 @@ export function renderMain(el, level, id, ctx) {
   frag.push(h('div', { class: 'q' },
     h('div', { class: 'q-row' }, h('p', { class: 'q-l' }, 'Quem vota em'), h('button', { class: 'q-swap', type: 'button', onclick: ctx.onSwap, title: 'Inverter (I)' }, ICON.trocar(), 'inverter')),
     chipCand('x', cx, { onClick: () => ctx.onPick('x'), rotulo: 'X' }),
-    h('p', { class: 'q-l' }, 'também vota em'),
+    h('div', { class: 'q-row' }, h('p', { class: 'q-l' }, 'também vota em'), h('button', { class: 'q-swap', type: 'button', onclick: ctx.onSolo, title: `Ver só ${X}, sem comparar` }, ICON.fechar(), `ver só ${X}`)),
     chipCand('y', cy, { onClick: () => ctx.onPick('y'), rotulo: 'Y' })));
 
   // ---- manchete: cautelosa ("parecem"), e só afirma direção quando as duas hipóteses concordam
@@ -172,7 +175,6 @@ export function renderMain(el, level, id, ctx) {
   frag.push(h('div', { class: 'answer' }, h('h2', { class: 'verdict' }, ...titulo)));
 
   // ---- 1. o que é certo (matemática das urnas, sem hipótese)
-  const camada = (rot, cls, ...filhos) => h('section', { class: `camada ${cls}` }, h('div', { class: 'camada-t' }, rot), ...filhos);
   if (r.exclusivos) {
     frag.push(camada('Certo, pelas urnas', 'c1', h('p', null, `${X} e ${Y} disputam a mesma vaga, e a urna aceita um voto só para ela: nenhum eleitor pode ter votado nos dois. A pergunta passa a ser se disputam os mesmos lugares.`)));
   } else if (r.lim && r.tx > 0) {
@@ -263,11 +265,68 @@ export function renderMain(el, level, id, ctx) {
   clear(el).append(...frag);
 }
 
+/**
+ * Um candidato só ("voo só de ida"): fatos do recorte (votos, participação, posição, onde o voto está) e um convite
+ * para comparar, com sugestões estimadas.
+ */
+function renderSolo(el, level, id, ctx) {
+  const p = getProps(level, id);
+  const nome = level === 'estado' ? D.meta.uf_nome : entityName(level, p);
+  const em = level === 'estado' ? 'no estado' : `em ${nome}`;
+  const cx = candOf(A.x), X = curto(cx.nome);
+  const pf = perfil(level, id);
+  const cargoNome = (D.cargos.get(cx.cargo)?.nome || '').toLowerCase();
+  const frag = [];
+  frag.push(h('div', { class: 'eyebrow' }, h('b', null, D.meta.uf_nome), h('span', null, '·'), h('span', null, '1º turno 2026'), level !== 'estado' ? [h('span', null, '·'), h('b', null, nome)] : null));
+  frag.push(h('div', { class: 'q' },
+    h('div', { class: 'q-row' }, h('p', { class: 'q-l' }, 'Quem vota em')),
+    chipCand('x', cx, { onClick: () => ctx.onPick('x'), rotulo: 'X' }),
+    h('p', { class: 'q-l' }, 'também vota em'),
+    h('button', { type: 'button', class: 'cc cc-y cc-add', onclick: () => ctx.onPick('y'), 'aria-label': 'Comparar com outro candidato' },
+      h('span', { class: 'av av-vazio' }, ICON.mais()),
+      h('span', { class: 'cc-t' }, h('b', null, 'Comparar com…'), h('span', null, 'outro candidato, de qualquer cargo')),
+      h('span', { class: 'cc-i', 'aria-hidden': 'true' }, '▾'))));
+
+  const sit = level === 'estado' ? situacao(cx.sit) : '';
+  frag.push(h('div', { class: 'answer' }, h('h2', { class: 'verdict' }, sp('x', X), ` teve ${fInt(pf.tx)} votos ${em}.`),
+    sit ? h('p', { class: 'verdict-s' }, `Situação no TSE: ${sit}.`) : null));
+  const pos = ctx.posicao?.();
+  frag.push(h('div', { class: 'stats' },
+    stat('Votos', fInt(pf.tx), em, 'Soma dos boletins de urna de todas as seções do recorte.'),
+    stat('De quem votou', fP(pf.px), 'dos que compareceram', 'Votos de X ÷ eleitores que compareceram no recorte (para presidente, inclui o voto em trânsito).'),
+    stat('Posição', pos && !pos.loading && pos.pos ? `${pos.pos}º` : '…', pos && !pos.loading ? `de ${fInt(pos.n)} para ${cargoNome}` : `para ${cargoNome}`, 'Posição em votos entre os candidatos do mesmo cargo, só neste recorte.')));
+
+  // onde o voto está (fatos)
+  const linhas = [];
+  if (pf.tx > 0 && pf.concEl > 0.05) {
+    const c = pf.conc, f = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 }).format(c / pf.concEl);
+    linhas.push(`As seções onde ${X} é mais forte reúnem ${fP0(pf.concEl)} dos eleitores e deram ${fP0(c)} dos votos de ${X} (${f}× o peso delas no eleitorado): ${c >= 0.6 ? 'voto muito concentrado' : c >= 0.35 ? 'voto concentrado' : 'voto espalhado'}.`);
+  }
+  if (pf.nMun >= 2 && pf.tx > 0) linhas.push(`Metade dos votos de ${X} veio de ${fInt(pf.nMeio)} ${pf.nMeio === 1 ? 'município' : 'municípios'}, de ${fInt(pf.nMun)}; teve voto em ${fInt(pf.comVoto)}.`);
+  if (linhas.length) frag.push(camada('Onde está o voto', 'c1', ...linhas.map((t) => h('p', null, t)), h('p', { class: 'nota' }, 'Contas diretas dos boletins de urna. O mapa mostra a participação de ' + X + ' em cada área.')));
+
+  // convite a comparar, com sugestões estimadas
+  const sug = ctx.sugestoesSolo?.();
+  const caixa = camada('Comparar', 'c3', h('p', null, `Escolha outro candidato para ver o que é certo, o que o mapa mostra e o que se estima sobre os eleitores de ${X}.`));
+  if (sug && !sug.loading && sug.lista.length) {
+    caixa.append(h('p', { class: 'nota' }, `Mais votados entre os eleitores de ${X} para ${sug.cargo} (estimativa):`));
+    for (const l of sug.lista) {
+      const c = candOf(l.key);
+      if (c) caixa.append(h('button', { type: 'button', class: 'ds-r', onclick: () => ctx.onY(l.key), title: `Comparar ${cx.nome} com ${c.nome}` }, avatar(c, 26), h('span', { class: 'ds-n' }, c.nome), h('span'), h('b', { class: 'ds-v tn' }, '→')));
+    }
+  } else if (sug?.loading) caixa.append(h('div', { class: 'skel', style: { height: '90px' } }));
+  frag.push(caixa);
+  frag.push(h('p', { class: 'aviso' }, ICON.info(), h('span', null, 'Votos e participação são somas exatas dos boletins de urna. O voto é secreto: ao comparar dois candidatos, o site separa o que é certo do que é estimado.')));
+  frag.push(h('p', { class: 'aviso muted' }, `Fonte: ${D.meta.fonte}.`));
+  clear(el).append(...frag);
+}
+
 // ------------------------------------------------------------------ cartão lateral (UF)
 export function renderSide(el, level, id, ctx) {
-  const tab = ctx.tab || 'comum';
+  const abas = A.y ? [['comum', 'Em comum'], ['onde', 'Onde'], ['pontos', 'Pontos']] : [['comum', 'Em comum'], ['onde', 'Onde']];
+  const tab = abas.some(([k]) => k === ctx.tab) ? ctx.tab : 'comum';
   const tabs = h('div', { class: 'tabs', role: 'tablist' });
-  for (const [k, t] of [['comum', 'Em comum'], ['onde', 'Onde'], ['pontos', 'Pontos']]) tabs.append(h('button', { type: 'button', role: 'tab', class: 'tab' + (k === tab ? ' on' : ''), 'aria-selected': String(k === tab), onclick: () => ctx.onTab(k) }, t));
+  for (const [k, t] of abas) tabs.append(h('button', { type: 'button', role: 'tab', class: 'tab' + (k === tab ? ' on' : ''), 'aria-selected': String(k === tab), onclick: () => ctx.onTab(k) }, t));
   const b = h('div', { class: 'side-b' });
   if (tab === 'comum') emComum(b, ctx);
   else if (tab === 'onde') onde(b, level, id, ctx);
@@ -280,12 +339,14 @@ export function renderSide(el, level, id, ctx) {
  * Faixa entre as duas hipóteses; o traço cinza é a taxa dos demais eleitores.
  */
 function emComum(b, ctx) {
-  const cx = candOf(A.x), cy = candOf(A.y), X = curto(cx.nome), Y = curto(cy.nome);
-  const de = ctx.sentido === 'de';
-  const seg = h('div', { class: 'seg seg-full' });
-  for (const [k, t] of [['de', ['Eleitores de ', sp('x', X)]], ['para', ['Eleitores de ', sp('y', Y)]]])
-    seg.append(h('button', { type: 'button', class: k === ctx.sentido ? 'on' : '', onclick: () => ctx.onSentido(k) }, ...t));
-  b.append(seg);
+  const cx = candOf(A.x), cy = A.y ? candOf(A.y) : null, X = curto(cx.nome), Y = cy ? curto(cy.nome) : '';
+  const de = !cy || ctx.sentido === 'de';
+  if (cy) {
+    const seg = h('div', { class: 'seg seg-full' });
+    for (const [k, t] of [['de', ['Eleitores de ', sp('x', X)]], ['para', ['Eleitores de ', sp('y', Y)]]])
+      seg.append(h('button', { type: 'button', class: k === ctx.sentido ? 'on' : '', onclick: () => ctx.onSentido(k) }, ...t));
+    b.append(seg);
+  }
   b.append(h('div', { class: 'sec-t' }, h('b', null, de ? `Os eleitores de ${X} votaram em quem?` : `Que eleitorados mais coincidem com o de ${Y}?`), 'estimativa'));
   const cargoFixo = de ? cx.cargo : cy.cargo;
   const chips = h('div', { class: 'chips' });
@@ -335,20 +396,20 @@ function emComum(b, ctx) {
 function onde(b, level, id, ctx) {
   const { level: cl, items } = childrenOf(level, id);
   if (!cl || !items.length || !D.un[cl]) { b.append(h('div', { class: 'side-note' }, 'Sem subdivisões neste recorte.')); return; }
-  const r = recorte(level, id);
+  const r = A.y ? recorte(level, id) : null;
   const vals = items.map((p) => ({ p, v: valorDe(cl, p.id) })).filter((x) => x.v && x.v.dx > 0);
-  const ord = ctx.ondeOrd || 'x';
+  const ord = !A.y && ctx.ondeOrd === 'y' ? 'x' : ctx.ondeOrd || 'x';
   vals.sort((a, c) => (ord === 'x' ? c.v.x - a.v.x : ord === 'y' ? c.v.y - a.v.y : c.v.dx - a.v.dx));
   const chips = h('div', { class: 'chips' });
-  for (const [k, t] of [['x', `por ${curto(nomeCand(A.x))}`], ['y', `por ${curto(nomeCand(A.y))}`], ['ap', 'por eleitores']]) chips.append(h('button', { type: 'button', class: 'chip' + (k === ord ? ' on' : ''), onclick: () => ctx.onOndeOrd(k) }, t));
+  for (const [k, t] of [['x', `por ${curto(nomeCand(A.x))}`], A.y ? ['y', `por ${curto(nomeCand(A.y))}`] : null, ['ap', 'por eleitores']].filter(Boolean)) chips.append(h('button', { type: 'button', class: 'chip' + (k === ord ? ' on' : ''), onclick: () => ctx.onOndeOrd(k) }, t));
   b.append(h('div', { class: 'sec-t' }, h('b', null, `${LEVEL_INFO[cl].plural} (${vals.length})`)), chips);
   const lim = ctx.mais ? vals.length : 25;
   for (const { p, v } of vals.slice(0, lim)) {
-    const k = classeBiv(v, r.px, r.py);
+    const k = r ? classeBiv(v, r.px, r.py) : -1;
     b.append(h('button', { type: 'button', class: 'row', onclick: () => ctx.onSelect(cl, p.id) },
-      h('span', { class: 'sw', style: { background: k >= 0 ? BIV[k] : SEM_DADO }, title: textoBiv(k) }),
+      r ? h('span', { class: 'sw', style: { background: k >= 0 ? BIV[k] : SEM_DADO }, title: textoBiv(k) }) : null,
       h('span', { class: 'row-n' }, h('b', null, cl === 'secao' ? `Seção ${p.nr}` : p.n), h('span', null, `${fInt(v.dx)} compareceram`)),
-      h('span', { class: 'row-v tn' }, h('b', { style: { color: 'var(--x)' } }, fP(v.px)), h('span', { style: { color: 'var(--y)' } }, fP(v.py)))));
+      h('span', { class: 'row-v tn' }, h('b', { style: { color: 'var(--x)' } }, fP(v.px)), r ? h('span', { style: { color: 'var(--y)' } }, fP(v.py)) : h('span', null, `${fInt(v.x)} votos`))));
   }
   if (vals.length > lim) b.append(h('button', { type: 'button', class: 'more-btn', onclick: ctx.onMais }, `Mostrar todos (${vals.length})`));
 }

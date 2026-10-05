@@ -2,10 +2,14 @@
 import { D, cargoOf, denomOf, getProps, secsOf } from './data.js';
 import { analisa, encolhe, pearson } from './stats.js';
 
+// Sem Y (yKey null) é o modo de um candidato só ("voo só de ida"): Y, DY e as somas de Y ficam zeradas e o painel
+// mostra o perfil de X em vez do cruzamento.
 export const A = { x: null, y: null, X: null, Y: null, DX: null, DY: null, ver: 0, cache: new Map() };
 
+export const solo = () => !A.y;
+
 export function setPar(xKey, X, yKey, Y) {
-  Object.assign(A, { x: xKey, y: yKey, X, Y, DX: denomOf(xKey), DY: denomOf(yKey), ver: A.ver + 1 });
+  Object.assign(A, { x: xKey, y: yKey || null, X, Y: yKey ? Y : null, DX: denomOf(xKey), DY: yKey ? denomOf(yKey) : null, ver: A.ver + 1 });
   A.cache.clear();
 }
 
@@ -22,10 +26,12 @@ export function porUnidade(level) {
   return memo(`u:${level}`, () => {
     const u = D.un[level], nU = u.ids.length;
     const x = new Float64Array(nU), y = new Float64Array(nU), dx = new Float64Array(nU), dy = new Float64Array(nU);
+    const Y = A.Y, DY = A.DY;
     for (let s = 0; s < D.n; s++) {
       const g = u.idx[s];
       if (g < 0) continue;
-      x[g] += A.X[s]; y[g] += A.Y[s]; dx[g] += A.DX[s]; dy[g] += A.DY[s];
+      x[g] += A.X[s]; dx[g] += A.DX[s];
+      if (Y) { y[g] += Y[s]; dy[g] += DY[s]; }
     }
     return { x, y, dx, dy };
   });
@@ -50,7 +56,7 @@ export function valorDe(level, id) {
 function estado() {
   return memo('est', () => {
     let x = 0, y = 0, dx = 0, dy = 0;
-    for (let s = 0; s < D.n; s++) { x += A.X[s]; y += A.Y[s]; dx += A.DX[s]; dy += A.DY[s]; }
+    for (let s = 0; s < D.n; s++) { x += A.X[s]; dx += A.DX[s]; if (A.Y) { y += A.Y[s]; dy += A.DY[s]; } }
     return { x, y, dx, dy, px: dx > 0 ? x / dx : 0, py: dy > 0 ? y / dy : 0 };
   });
 }
@@ -149,3 +155,26 @@ export function territorio(level, id, fatia = 0.2) {
 }
 
 
+
+/**
+ * Perfil de X sozinho no recorte: votos, participação e como o voto se distribui (fatos, sem estimativa).
+ * conc = parte dos votos de X que saiu das seções onde ele é mais forte, somando 20% do eleitorado (sem concentração
+ * nenhuma daria 20%); nMeio = quantos municípios somam metade dos votos dele.
+ */
+export function perfil(level, id) {
+  return memo(`pf:${level}:${id}`, () => {
+    const secs = secsOf(level, id);
+    let tx = 0, td = 0;
+    for (const s of secs) { tx += A.X[s]; td += A.DX[s]; }
+    const px = td > 0 ? tx / td : 0;
+    const ord = Array.from(secs).filter((s) => A.DX[s] > 0).sort((a, b) => encolhe(A.X[b], A.DX[b], px) - encolhe(A.X[a], A.DX[a], px));
+    let el = 0, vx = 0;
+    for (const s of ord) { if (el >= 0.2 * td) break; el += A.DX[s]; vx += A.X[s]; }
+    const porMun = new Map();
+    for (const s of secs) { const m = D.loc.mi[D.sec.li[s]]; porMun.set(m, (porMun.get(m) || 0) + A.X[s]); }
+    const mv = [...porMun.values()].sort((a, b) => b - a);
+    let acc = 0, nMeio = 0;
+    for (const v of mv) { if (acc >= tx / 2) break; acc += v; nMeio++; }
+    return { tx, td, px, conc: tx > 0 ? vx / tx : 0, concEl: td > 0 ? el / td : 0, nMun: porMun.size, nMeio, comVoto: mv.filter((v) => v > 0).length };
+  });
+}

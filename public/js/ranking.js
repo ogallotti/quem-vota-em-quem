@@ -125,3 +125,25 @@ function calculaDe(xKey, X, cargo, series, secs) {
   lista.sort((p, q) => q.est + q.viz - p.est - p.viz);
   return { lista, tx, minimo };
 }
+
+/** Posição de X entre os candidatos do cargo dele, em votos, no recorte. @returns Promise<{pos, n}> */
+export function posicao(xKey, cargo, level, id) {
+  const k = `pos|${xKey}|${level}:${id}`;
+  if (cache.has(k)) return cache.get(k);
+  const p = loadCargo(cargo).then((series) => {
+    const no = new Uint8Array(D.n);
+    for (const s of secsOf(level, id)) no[s] = 1;
+    const tot = [];
+    for (const [key, sp] of series) {
+      if (cargoOf(key) !== cargo) continue;
+      let t = 0;
+      for (let j = 0; j < sp.s.length; j++) if (no[sp.s[j]]) t += sp.v[j];
+      if (t > 0) tot.push([key, t]);
+    }
+    const meu = tot.find(([key]) => key === xKey)?.[1] || 0;
+    return { pos: meu > 0 ? 1 + tot.filter(([, t]) => t > meu).length : null, n: tot.length };
+  });
+  cache.set(k, p);
+  p.catch(() => cache.delete(k));
+  return p;
+}
