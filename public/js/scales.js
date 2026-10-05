@@ -28,9 +28,11 @@ export const DIV = ['#c51b7d', '#de77ae', '#f1b6da', '#eceae4', '#b8e186', '#7fb
 export const R_CORTES = [-0.5, -0.3, -0.1, 0.1, 0.3, 0.5];
 export const R_TXT = ['−0,5 ou menos', '−0,5 a −0,3', '−0,3 a −0,1', 'nenhuma (±0,1)', '0,1 a 0,3', '0,3 a 0,5', '0,5 ou mais'];
 
-// Votos dos dois (lente padrão): Y é a LUZ (escala de cinza, do apagado ao branco, por quintis do eleitorado) e X é a COR por cima
-// (azul, da ausência à saturação máxima). Azul claro e vivo = os dois fortes. Cores em OKLCH, para a luminosidade
-// ser percebida igual em todas as casas. Índice = faixa de Y (0–4) × 5 + faixa de X (0–4).
+// Votos dos dois (lente padrão): Y é a LUZ (do apagado ao claro, por quintis do eleitorado) e X é a COR (azul, da
+// ausência à saturação máxima). Cores em OKLCH. Índice = faixa de Y (0–4) × 5 + faixa de X (0–4).
+// O azul só atinge a saturação máxima numa luz média (L ≈ 0,72): acima disso ele desbota até o branco. Por isso a luz
+// de cada linha desliza do cinza claro (sem X) até essa luz (X máximo): a casa "os dois fortes" é a mais saturada do
+// mapa, e a saturação cresce com X em toda linha e com Y em toda coluna.
 function oklchLin(L, C, hDeg) {
   const h = (hDeg * Math.PI) / 180, a = C * Math.cos(h), b = C * Math.sin(h);
   const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3, m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3, s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
@@ -43,16 +45,20 @@ function oklch(L, C, hDeg) {
   if (!cabe(C)) { for (let i = 0; i < 24; i++) { const mid = (lo + hi) / 2; if (cabe(mid)) lo = mid; else hi = mid; } C = lo; }
   return '#' + oklchLin(L, C, hDeg).map((v) => { const g = v <= 0.0031308 ? 12.92 * v : 1.055 * Math.max(0, v) ** (1 / 2.4) - 0.055; return Math.round(Math.max(0, Math.min(1, g)) * 255).toString(16).padStart(2, '0'); }).join('');
 }
-export const YX_L = [0.24, 0.40, 0.56, 0.72, 0.88];
+export const YX_L = [0.24, 0.40, 0.56, 0.72, 0.88]; // luz de cada faixa de Y sem voto de X (cinza)
+const YX_LB = [0.24, 0.355, 0.47, 0.585, 0.70]; // luz de cada faixa de Y com X máximo (até o pico de saturação do azul)
 export const YX_F = [0, 0.32, 0.58, 0.82, 1]; // fração da saturação máxima que cabe na tela naquela luz
-export const YX_H = 240; // azul (levemente para o ciano, que aguenta mais saturação no claro)
+export const YX_H = 240;
 /** Croma máxima de um matiz numa luz (busca binária no gamut sRGB). */
 function cromaMax(L, hDeg) {
   let lo = 0, hi = 0.4;
   for (let i = 0; i < 24; i++) { const mid = (lo + hi) / 2; if (oklchLin(L, mid, hDeg).every((v) => v >= -1e-4 && v <= 1 + 1e-4)) lo = mid; else hi = mid; }
   return lo;
 }
-export const YX = YX_L.flatMap((L) => { const cm = cromaMax(L, YX_H); return YX_F.map((f) => oklch(L, f * cm, YX_H)); });
+export const YX = YX_L.flatMap((Lg, fy) => YX_F.map((f, fx) => {
+  const t = fx / (YX_F.length - 1), L = Lg + (YX_LB[fy] - Lg) * t;
+  return oklch(L, f * cromaMax(L, YX_H), YX_H);
+}));
 
 export const LENTES = {
   yx: { id: 'yx', label: 'Votos dos dois', curto: 'Os dois', desc: 'Cada área mostra os dois candidatos ao mesmo tempo: quanto mais clara, mais votos de Y; quanto mais azul, mais votos de X. Azul-claro vivo = os dois fortes; escuro = nenhum dos dois.' },

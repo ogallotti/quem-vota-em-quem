@@ -215,9 +215,9 @@ details.more[open] summary::after { content: "−"; }
 .meter.rng { position: relative; overflow: visible; width: 64px; }
 .meter.rng i { border-radius: 2px; }
 .meter .tick { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--ink-2); opacity: .7; }
-.seg-full { display: flex; width: 100%; margin-bottom: 12px; }
-.seg-full { border-radius: 14px; }
-.seg-full button { flex: 1; min-width: 0; white-space: normal; line-height: 1.25; border-radius: 11px; padding: 6px 8px; }
+.seg.seg-full { display: flex; width: 100%; margin-bottom: 12px; }
+.seg.seg-full { border-radius: 14px; }
+.seg.seg-full button { flex: 1; min-width: 0; white-space: normal; line-height: 1.25; border-radius: 11px; padding: 6px 8px; }
 .row-v b.larga { color: var(--muted); font-weight: 400; text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
 .ord-nota { margin: 6px 0 10px; }
 .rk-i { font-size: 11px; color: var(--muted); text-align: right; }
