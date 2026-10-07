@@ -4,7 +4,7 @@
 
 **STATUS**: teste (só lê dados públicos do TSE/IBGE; nenhuma mensagem a ninguém). Projeto geral, sem vínculo com campanha: não acrescentar dados de campanha nem nomes de clientes.
 
-**Onde roda / deploy**: Cloudflare Pages, pasta `public/`, **somente via CI** (`.github/workflows/deploy.yml`, wrangler, projeto `quem-vota-em-quem`). Secrets `CLOUDFLARE_API_TOKEN` e `CLOUDFLARE_ACCOUNT_ID` no GitHub. Site público (sem senha): só dados públicos.
+**Onde roda / deploy**: Cloudflare Pages, pasta `public/`, **somente via CI** (`.github/workflows/deploy.yml`, wrangler, projeto `quem-vota-em-quem`). No ar desde 06/10/2026 em https://quem-vota-em-quem.pages.dev (todo push na `main` publica). Secrets `CLOUDFLARE_API_TOKEN` (token "quem-vota-em-quem CI (Pages)", só permissão Pages Write na conta) e `CLOUDFLARE_ACCOUNT_ID` no GitHub; variável `PAGES_ATIVO=true` liga o job de deploy. Site público (sem senha): só dados públicos.
 
 **Comandos**
 - Dev: `python3 -m http.server 4190 --directory public --bind 127.0.0.1` (neste ambiente, via Portly: `portly temp '...' --path <repo>`).
