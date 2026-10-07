@@ -83,8 +83,8 @@ export function renderLegend(el, { lente, classes, escopo }) {
     const g = h('div', { class: 'yx-g', role: 'img', 'aria-label': `Legenda: luz = ${Y}, cor = ${X}` });
     for (let fy = 4; fy >= 0; fy--) for (let fx = 0; fx < 5; fx++) g.append(h('i', { style: { background: YX[fy * 5 + fx] } }));
     el.append(h('div', { class: 'yx-wrap' },
-      h('div', { class: 'yx-ax-y' }, h('span', null, `${Y} forte`), h('span', null, 'sem voto')),
-      h('div', null, g, h('div', { class: 'yx-ax-x' }, h('span', null, `${X} fraco`), h('span', null, 'forte'))),
+      h('div', { class: 'yx-ax-y' }, h('span', null, `${Y} forte`), h('span', null, 'sem voto'), h('span', { class: 'yx-m' }, `${Y} ↑`)),
+      h('div', null, g, h('div', { class: 'yx-ax-x' }, h('span', null, `${X} fraco`), h('span', null, 'forte'), h('span', { class: 'yx-m' }, `${X} →`))),
       h('div', { class: 'yx-k' },
         h('div', null, h('i', { style: { background: YX[24] } }), h('span', null, h('b', null, 'os dois fortes'))),
         h('div', null, h('i', { style: { background: YX[20] } }), h('span', null, `só ${Y}`)),

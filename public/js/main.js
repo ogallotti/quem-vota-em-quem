@@ -24,7 +24,8 @@ function computeLayout() {
   const sw = screen.width || innerWidth;
   const k = touch && sw < 1000 && innerWidth > sw * 1.15 ? innerWidth / sw : 1;
   const W = innerWidth / k, H = innerHeight / k;
-  const m = W <= 820, ml = m && H <= 520;
+  // celular deitado (ex.: 844 × 390) também é celular: a altura baixa não comporta o layout de mesa
+  const m = W <= 820 || (touch && H <= 520 && W <= 1100), ml = m && H <= 520;
   const app = $('app');
   if (k !== 1) Object.assign(app.style, { width: `${W}px`, height: `${H}px`, transform: `scale(${k})` });
   else Object.assign(app.style, { width: '', height: '', transform: '' });
@@ -39,7 +40,8 @@ computeLayout();
 function padding() {
   if (mobile()) {
     const H = $('app').offsetHeight, sh = UI.ml ? 0 : $('sheet').offsetHeight;
-    return UI.ml ? { top: 70, left: 12, right: $('sheet').offsetWidth + 12, bottom: 20 } : { top: 100, left: 16, right: 16, bottom: Math.min(H * 0.6, sh) + 16 };
+    const topo = $('mapbar').hidden ? 70 : $('mapbar').getBoundingClientRect().bottom / UI.k + 12;
+    return UI.ml ? { top: topo, left: 12, right: $('sheet').offsetWidth + 12, bottom: 20 } : { top: topo, left: 16, right: 16, bottom: Math.min(H * 0.6, sh) + 16 };
   }
   const focus = document.body.classList.contains('focus');
   const W = $('app').offsetWidth;
@@ -222,6 +224,7 @@ function renderCards() {
   const c = ctxSide();
   renderMain($('main-card'), state.sel.level, state.sel.id, c);
   renderSide($('side-card'), state.sel.level, state.sel.id, c);
+  alturaPeek();
 }
 
 const curtoNome = (k) => { const p = (candOf(k)?.nome || '').split(' '); return p.length > 2 ? `${p[0]} ${p[p.length - 1]}` : p.join(' '); };
@@ -279,6 +282,7 @@ const ctl = {
     Object.assign(state, { modo: 'br', sel: { level: 'br', id: 0 } });
     document.body.classList.remove('uf');
     view.setFocus(null); view.setSelection(null); view.setModo('br');
+    if (mobile()) setSnap('half');
     pintarBR(); renderTop(); renderCards(); view.fit('br', 0);
     writeHash();
   },
@@ -289,6 +293,7 @@ const ctl = {
     state.x = x; state.y = y;
     setPar(x, X, y, Y);
     pintar(); renderTop(); renderCards(); writeHash();
+    if (mobile()) setSnap('peek');
   },
   setX(x) { return ctl.setPar(x, !state.y ? null : x === state.y ? state.x : state.y); },
   setY(y) { if (!state.y && y === state.x) return; return ctl.setPar(y === state.x ? state.y : state.x, y); },
@@ -309,7 +314,8 @@ const ctl = {
     renderTop();
     renderCrumbs(CRUMBS, level, id, (l, i) => ctl.select(l, i));
     if (fit) view.fit(level, id);
-    if (mobile() && $('sheet').dataset.snap === 'full') setSnap('half');
+    // celular: ao escolher uma área, a gaveta recolhe e mostra a resposta sobre o mapa
+    if (mobile()) setSnap('peek');
     writeHash();
   },
   setLente(id) { if (!LENTES[id] || !state.y) return; state.lente = id; pintar(); renderTop(); writeHash(); },
@@ -390,6 +396,14 @@ function setSnap(s) {
   if (s !== 'full') sh.scrollTop = 0;
   setTimeout(() => { medir(); if (s !== 'full' && view && state.modo === 'uf') view.fit(state.sel.level, state.sel.id, { duration: 400 }); }, 280);
 }
+/** Gaveta recolhida: alta o bastante para mostrar a pergunta e a resposta (manchete), no máximo metade da tela. */
+function alturaPeek() {
+  if (!mobile() || UI.ml) return;
+  const sh = $('sheet'), alvo = $('main-card').querySelector('.answer, .hero');
+  if (!alvo) return;
+  const fim = alvo.offsetTop + alvo.offsetHeight + 14;
+  sh.style.setProperty('--peek-h', `${Math.round(Math.max(170, Math.min(fim, $('app').offsetHeight * 0.5)))}px`);
+}
 function medir() { document.documentElement.style.setProperty('--sheet-h', `${mobile() && !UI.ml ? $('sheet').offsetHeight : 0}px`); }
 function setupSheet() {
   const sh = $('sheet'), handle = $('sheet-handle');
@@ -403,6 +417,8 @@ function setupSheet() {
     else setSnap(SNAPS[Math.max(0, Math.min(2, i + (dy < 0 ? 1 : -1)))]);
   });
   new ResizeObserver(medir).observe(sh);
+  // toque na gaveta recolhida (fora de botões) abre até a metade
+  sh.addEventListener('click', (e) => { if (sh.dataset.snap === 'peek' && !e.target.closest('button, a, input, summary')) setSnap('half'); });
 }
 
 // ------------------------------------------------------------------ boot
