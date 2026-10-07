@@ -57,7 +57,8 @@ export class Tooltip {
       this.last = key;
       const k = classeBiv(v, ctx.px, ctx.py);
       const rl = ctx.lente === 'r' ? rPorUnidade(level)[D.un[level].pos.get(id)] : null;
-      clear(this.el).append(
+      // append nativo escreve "null": as linhas opcionais (sem Y) saem pelo filter
+      clear(this.el).append(...[
         h('div', { class: 'tip-h' }, LEVEL_INFO[level].label),
         h('div', { class: 'tip-n' }, entityName(level, p)),
         this.linha(curto(nomeCand(A.x)), `${fP(v.px)} · ${fInt(v.x)}`, 'x'),
@@ -66,7 +67,7 @@ export class Tooltip {
         !A.y ? null : ctx.lente === 'r'
           ? h('div', { class: 'tip-f' }, `Correlação entre os locais: ${fR(Number.isNaN(rl) ? null : rl)}`)
           : h('div', { class: 'tip-f' }, h('i', { style: { background: k >= 0 ? BIV[k] : SEM_DADO } }), textoBiv(k)),
-      );
+      ].filter(Boolean));
     }
     this._place(point);
   }
